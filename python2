@@ -1,0 +1,234 @@
+from fastapi import FastAPI, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
+from pathlib import Path
+
+from Backend.broker import broker
+
+
+# ---------------------------------------------------------
+# Application
+# ---------------------------------------------------------
+
+app = FastAPI(
+    title="Trading Dashboard",
+    description="Custom 5paisa/Xstream trading dashboard",
+    version="1.0.0"
+)
+
+
+# ---------------------------------------------------------
+# 5PAISA LOGIN
+# ---------------------------------------------------------
+
+@app.get("/api/5paisa/login")
+def fivepaisa_login():
+
+    try:
+        login_url = broker.get_oauth_login_url()
+
+        return {
+            "status": "ok",
+            "login_url": login_url,
+        }
+
+    except Exception as e:
+
+        return {
+            "status": "error",
+            "message": str(e),
+        }
+
+
+# ---------------------------------------------------------
+# 5PAISA CALLBACK
+# ---------------------------------------------------------
+
+@app.get("/api/5paisa/callback", response_class=HTMLResponse)
+def fivepaisa_callback(
+    RequestToken: str = "",
+    state: str = "",
+):
+
+    if not RequestToken:
+        return """
+        <html>
+        <body>
+            <h2>5paisa Login Failed</h2>
+            <p>RequestToken नहीं मिला.</p>
+        </body>
+        </html>
+        """
+
+    try:
+
+        result = broker.exchange_request_token(RequestToken)
+
+        return f"""
+        <html>
+        <body>
+            <h2>5paisa Connected Successfully</h2>
+
+            <p>Trading Dashboard अब 5paisa से connected है.</p>
+
+            <p>
+                Client Code:
+                <b>{result.get("client_code")}</b>
+            </p>
+
+            <p>
+                आप इस window को बंद कर सकते हैं.
+            </p>
+        </body>
+        </html>
+        """
+
+    except Exception as e:
+
+        return f"""
+        <html>
+        <body>
+            <h2>5paisa Connection Failed</h2>
+            <pre>{str(e)}</pre>
+        </body>
+        </html>
+        """
+
+
+# ---------------------------------------------------------
+# 5PAISA STATUS
+# ---------------------------------------------------------
+
+@app.get("/api/5paisa/status")
+def fivepaisa_status():
+
+    return {
+        "connected": broker.connected,
+        "client_code": broker.client_code,
+        "configuration": broker.configuration_status(),
+    }
+
+
+# ---------------------------------------------------------
+# CORS
+# ---------------------------------------------------------
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ---------------------------------------------------------
+# Project paths
+# ---------------------------------------------------------
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+FRONTEND_DIR = BASE_DIR / "frontend"
+
+
+# ---------------------------------------------------------
+# Supported symbols
+# ---------------------------------------------------------
+
+SUPPORTED_SYMBOLS = [
+    "NIFTY",
+    "BANKNIFTY",
+    "SENSEX",
+    "CRUDEOIL",
+    "NATURALGAS",
+]
+
+
+# ---------------------------------------------------------
+# Health check
+# ---------------------------------------------------------
+
+@app.get("/api/health")
+async def health():
+
+    return {
+        "status": "ok",
+        "application": "Trading Dashboard",
+        "version": "1.0.0"
+    }
+
+
+# ---------------------------------------------------------
+# Available symbols
+# ---------------------------------------------------------
+
+@app.get("/api/symbols")
+async def get_symbols():
+
+    return {
+        "symbols": SUPPORTED_SYMBOLS
+    }
+
+
+# ---------------------------------------------------------
+# Current dashboard configuration
+# ---------------------------------------------------------
+
+@app.get("/api/dashboard")
+async def dashboard():
+
+    return {
+        "future_chart": True,
+        "call_chart": True,
+        "put_chart": True,
+        "smoothed_heikin_ashi": True,
+        "symbols": SUPPORTED_SYMBOLS,
+        "buy_sell_enabled": False
+    }
+
+
+# ---------------------------------------------------------
+# WebSocket
+# ---------------------------------------------------------
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+
+    await websocket.accept()
+
+    await websocket.send_json({
+        "type": "connection",
+        "status": "connected",
+        "message": "Trading dashboard WebSocket connected"
+    })
+
+    try:
+
+        while True:
+
+            message = await websocket.receive_json()
+
+            await websocket.send_json({
+                "type": "ack",
+                "data": message
+            })
+
+    except Exception:
+
+        pass
+
+
+# ---------------------------------------------------------
+# Frontend
+# ---------------------------------------------------------
+
+if FRONTEND_DIR.exists():
+
+    app.mount(
+        "/",
+        StaticFiles(
+            directory=str(FRONTEND_DIR),
+            html=True
+        ),
+        name="frontend"
+    )
