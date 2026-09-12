@@ -1,0 +1,96 @@
+```env
+# ============================================================
+# APPLICATION
+# ============================================================
+
+APP_NAME=Trading Dashboard
+APP_ENV=development
+DEBUG=true
+
+HOST=127.0.0.1
+PORT=8000
+
+
+# ============================================================
+# 5PAISA / XSTREAM
+# ============================================================
+
+FIVEPAISA_APP_NAME=
+FIVEPAISA_USER_ID=
+FIVEPAISA_PASSWORD=
+FIVEPAISA_USER_KEY=
+FIVEPAISA_ENCRYPTION_KEY=
+
+
+# ============================================================
+# DASHBOARD
+# ============================================================
+
+DEFAULT_SYMBOL=NIFTY
+DEFAULT_TIMEFRAME=5m
+
+OTM_CALL_COUNT=5
+OTM_PUT_COUNT=5
+
+
+# ============================================================
+# MARKET DATA
+# ============================================================
+
+MARKET_DATA_ENABLED=true
+
+DEFAULT_CANDLE_COUNT=500
+MAX_CANDLES=2000
+
+WEBSOCKET_ENABLED=true
+WEBSOCKET_HEARTBEAT_SECONDS=20
+
+
+# ============================================================
+# BROKER
+# ============================================================
+
+BROKER_NAME=5paisa
+BROKER_ENVIRONMENT=production
+
+
+# ============================================================
+# API ENDPOINTS
+# ============================================================
+
+FIVEPAISA_API_BASE_URL=
+FIVEPAISA_MARKET_DATA_URL=
+FIVEPAISA_ORDER_URL=
+
+
+# ============================================================
+# TRADING
+# ============================================================
+
+# Keep FALSE while we are building/testing market data.
+
+TRADING_ENABLED=false
+ORDERS_ENABLED=false
+
+
+# ============================================================
+# RISK
+# ============================================================
+
+MAX_ORDER_QUANTITY=0
+MAX_DAILY_ORDERS=0
+
+
+# ============================================================
+# LOGGING
+# ============================================================
+
+LOG_LEVEL=INFO
+
+
+# ============================================================
+# CORS
+# ============================================================
+
+CORS_ALLOW_ORIGINS=http://127.0.0.1:8000,http://localhost:8000
+```
