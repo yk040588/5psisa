@@ -1,0 +1,9 @@
+```text
+fastapi
+uvicorn[standard]
+python-dotenv
+pandas
+numpy
+requests
+websockets
+```
