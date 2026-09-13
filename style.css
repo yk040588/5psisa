@@ -1,7 +1,12 @@
-```css
 /* =========================================================
-   TRADING DASHBOARD
+   5PAISA TRADING DASHBOARD
+   PHASE 1
    Main stylesheet
+   ========================================================= */
+
+
+/* =========================================================
+   GLOBAL
    ========================================================= */
 
 * {
@@ -19,7 +24,12 @@ body {
 body {
     background: #0b0f14;
     color: #e6edf3;
-    font-family: Arial, Helvetica, sans-serif;
+
+    font-family:
+        Arial,
+        Helvetica,
+        sans-serif;
+
     overflow: hidden;
 }
 
@@ -29,41 +39,60 @@ body {
    ========================================================= */
 
 .topbar {
+
     height: 64px;
     width: 100%;
 
     display: flex;
+
     align-items: center;
     justify-content: space-between;
 
     padding: 0 16px;
 
     background: #11161d;
-    border-bottom: 1px solid #252c35;
+
+    border-bottom:
+        1px solid #252c35;
 }
 
+
 .brand {
+
     display: flex;
+
     align-items: center;
+
     gap: 14px;
 
     min-width: 220px;
 }
 
+
 .brand-name {
+
+    color: #e6edf3;
+
     font-size: 18px;
+
     font-weight: 600;
+
     letter-spacing: 0.2px;
 }
 
+
 .status {
+
     font-size: 12px;
+
     white-space: nowrap;
 }
+
 
 .status.connected {
     color: #31c48d;
 }
+
 
 .status.disconnected {
     color: #ef5350;
@@ -71,65 +100,94 @@ body {
 
 
 /* =========================================================
-   CONTROLS
+   TOP CONTROLS
    ========================================================= */
 
 .controls {
+
     display: flex;
+
     align-items: center;
+
     gap: 12px;
 }
 
+
 .control-group {
+
     display: flex;
+
     align-items: center;
+
     gap: 6px;
 }
 
+
 .control-group label {
+
     color: #8b98a8;
+
     font-size: 12px;
 }
 
+
 select {
+
     min-width: 110px;
 
-    padding: 7px 28px 7px 9px;
+    padding:
+        7px
+        28px
+        7px
+        9px;
 
     background: #181e26;
+
     color: #e6edf3;
 
-    border: 1px solid #303944;
+    border:
+        1px solid #303944;
+
     border-radius: 4px;
 
     font-size: 13px;
 
     outline: none;
+
     cursor: pointer;
 }
 
+
 select:hover {
+
     border-color: #4b5664;
 }
 
+
 select:focus {
+
     border-color: #687586;
 }
 
+
 select option {
+
     background: #181e26;
+
     color: #e6edf3;
 }
 
 
 /* =========================================================
-   MARKET INFORMATION BAR
+   MARKET BAR
    ========================================================= */
 
 .market-bar {
+
     height: 42px;
 
     display: flex;
+
     align-items: center;
 
     gap: 28px;
@@ -137,31 +195,56 @@ select option {
     padding: 0 16px;
 
     background: #0f141a;
-    border-bottom: 1px solid #252c35;
+
+    border-bottom:
+        1px solid #252c35;
 }
 
+
 .market-info {
+
     display: flex;
+
     align-items: center;
+
     gap: 8px;
 
     font-size: 12px;
 }
 
+
 .market-label {
+
     color: #778494;
+
     text-transform: uppercase;
+
     font-size: 11px;
+
     letter-spacing: 0.5px;
 }
 
+
 .instrument-name {
+
     color: #b9c4d0;
+
+    max-width: 220px;
+
+    overflow: hidden;
+
+    text-overflow: ellipsis;
+
+    white-space: nowrap;
 }
 
+
 .ltp {
+
     color: #f1f5f9;
+
     font-weight: 600;
+
     min-width: 65px;
 }
 
@@ -171,14 +254,21 @@ select option {
    ========================================================= */
 
 .chart-layout {
+
     width: 100%;
 
-    height: calc(100vh - 106px);
+    height:
+        calc(100vh - 106px);
 
     display: grid;
 
-    grid-template-columns: 2fr 1fr;
-    grid-template-rows: 1fr 1fr;
+    grid-template-columns:
+        2fr
+        1fr;
+
+    grid-template-rows:
+        1fr
+        1fr;
 
     gap: 4px;
 
@@ -193,33 +283,46 @@ select option {
    ========================================================= */
 
 .chart-panel {
+
     position: relative;
 
     min-width: 0;
+
     min-height: 0;
 
     display: flex;
+
     flex-direction: column;
 
     background: #10151b;
 
-    border: 1px solid #252c35;
+    border:
+        1px solid #252c35;
 
     overflow: hidden;
 }
 
+
 .future-panel {
+
     grid-column: 1;
+
     grid-row: 1 / 3;
 }
 
+
 .call-panel {
+
     grid-column: 2;
+
     grid-row: 1;
 }
 
+
 .put-panel {
+
     grid-column: 2;
+
     grid-row: 2;
 }
 
@@ -229,30 +332,40 @@ select option {
    ========================================================= */
 
 .chart-header {
+
     height: 38px;
+
     min-height: 38px;
 
     display: flex;
+
     align-items: center;
+
     justify-content: space-between;
 
     padding: 0 10px;
 
     background: #141a21;
 
-    border-bottom: 1px solid #252c35;
+    border-bottom:
+        1px solid #252c35;
 }
 
+
 .chart-title {
+
     color: #e6edf3;
 
     font-size: 12px;
+
     font-weight: 700;
 
     letter-spacing: 0.7px;
 }
 
+
 .contract-name {
+
     margin-left: 8px;
 
     color: #7f8b99;
@@ -260,33 +373,53 @@ select option {
     font-size: 11px;
 }
 
+
 .chart-actions {
+
     display: flex;
+
     align-items: center;
+
     gap: 7px;
 }
 
-.indicator-label {
-    padding: 3px 6px;
 
-    border: 1px solid #303944;
+.indicator-label {
+
+    padding:
+        3px
+        6px;
+
+    border:
+        1px solid #303944;
+
     border-radius: 3px;
 
     color: #9aa7b5;
 
     font-size: 10px;
+
     letter-spacing: 0.5px;
 }
 
+
 .selector-label {
+
     color: #7f8b99;
+
     font-size: 10px;
 }
 
+
 .chart-actions select {
+
     min-width: 115px;
 
-    padding: 5px 23px 5px 7px;
+    padding:
+        5px
+        23px
+        5px
+        7px;
 
     font-size: 11px;
 }
@@ -297,6 +430,7 @@ select option {
    ========================================================= */
 
 .chart-container {
+
     position: relative;
 
     flex: 1;
@@ -310,26 +444,34 @@ select option {
     overflow: hidden;
 }
 
-.chart-container canvas,
-.chart-container svg {
+
+.chart-container canvas {
+
     display: block;
 
     width: 100%;
+
     height: 100%;
 }
 
 
 /* =========================================================
-   LOADING MESSAGE
+   CHART LOADING
    ========================================================= */
 
 .chart-loading {
+
     position: absolute;
 
     top: 50%;
+
     left: 50%;
 
-    transform: translate(-50%, -50%);
+    transform:
+        translate(
+            -50%,
+            -50%
+        );
 
     color: #596574;
 
@@ -342,50 +484,45 @@ select option {
 
 
 /* =========================================================
-   CHART GRID
-   ========================================================= */
-
-.chart-grid {
-    stroke: #1c232c;
-    stroke-width: 1;
-}
-
-.chart-axis {
-    color: #667281;
-    font-size: 10px;
-}
-
-
-/* =========================================================
-   SCROLLBARS
+   SCROLLBAR
    ========================================================= */
 
 ::-webkit-scrollbar {
+
     width: 7px;
+
     height: 7px;
 }
 
+
 ::-webkit-scrollbar-track {
+
     background: #0d1218;
 }
 
+
 ::-webkit-scrollbar-thumb {
+
     background: #303944;
+
     border-radius: 4px;
 }
 
+
 ::-webkit-scrollbar-thumb:hover {
+
     background: #46515f;
 }
 
 
 /* =========================================================
-   RESPONSIVE - TABLET
+   TABLET
    ========================================================= */
 
 @media (max-width: 1000px) {
 
     .topbar {
+
         height: auto;
 
         min-height: 64px;
@@ -394,36 +531,49 @@ select option {
 
         gap: 10px;
 
-        padding: 10px 12px;
+        padding:
+            10px
+            12px;
     }
 
+
     .controls {
+
         flex-wrap: wrap;
     }
 
+
     .market-bar {
+
         overflow-x: auto;
+
         white-space: nowrap;
     }
 
+
     .chart-layout {
-        height: calc(100vh - 116px);
+
+        height:
+            calc(100vh - 116px);
     }
 
 }
 
 
 /* =========================================================
-   RESPONSIVE - MOBILE
+   MOBILE
    ========================================================= */
 
 @media (max-width: 750px) {
 
     body {
+
         overflow: auto;
     }
 
+
     .topbar {
+
         position: relative;
 
         display: block;
@@ -431,45 +581,63 @@ select option {
         padding: 10px;
     }
 
+
     .brand {
+
         margin-bottom: 10px;
     }
 
+
     .controls {
+
         display: grid;
 
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns:
+            1fr
+            1fr;
 
         gap: 8px;
     }
 
+
     .control-group {
+
         width: 100%;
 
         display: flex;
+
         flex-direction: column;
 
         align-items: stretch;
+
         gap: 4px;
     }
 
+
     .control-group select {
+
         width: 100%;
     }
 
+
     .market-bar {
+
         height: auto;
 
         min-height: 42px;
 
-        padding: 8px 10px;
+        padding:
+            8px
+            10px;
 
         gap: 20px;
 
         overflow-x: auto;
     }
 
+
     .chart-layout {
+
         height: auto;
 
         min-height: 0;
@@ -477,31 +645,52 @@ select option {
         display: grid;
 
         grid-template-columns: 1fr;
+
         grid-template-rows:
-            minmax(400px, 1fr)
-            minmax(350px, 1fr)
-            minmax(350px, 1fr);
+
+            minmax(
+                400px,
+                1fr
+            )
+
+            minmax(
+                350px,
+                1fr
+            )
+
+            minmax(
+                350px,
+                1fr
+            );
 
         gap: 4px;
 
         padding: 4px;
     }
 
+
     .future-panel,
     .call-panel,
     .put-panel {
+
         grid-column: 1;
     }
 
+
     .future-panel {
+
         grid-row: 1;
     }
 
+
     .call-panel {
+
         grid-row: 2;
     }
 
+
     .put-panel {
+
         grid-row: 3;
     }
 
@@ -509,34 +698,46 @@ select option {
 
 
 /* =========================================================
-   VERY SMALL SCREENS
+   VERY SMALL SCREEN
    ========================================================= */
 
 @media (max-width: 480px) {
 
     .brand-name {
+
         font-size: 16px;
     }
 
+
     .controls {
+
         grid-template-columns: 1fr;
     }
 
+
     .chart-header {
-        padding: 0 7px;
+
+        padding:
+            0
+            7px;
     }
 
+
     .chart-title {
+
         font-size: 11px;
     }
 
+
     .contract-name {
+
         display: none;
     }
 
+
     .chart-actions select {
+
         min-width: 95px;
     }
 
 }
-```
