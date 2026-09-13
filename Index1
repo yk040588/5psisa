@@ -1,1 +1,455 @@
-czxc
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>5paisa Trading Dashboard</title>
+
+    <link
+        rel="stylesheet"
+        href="/style.css"
+    >
+</head>
+
+<body>
+
+    <!-- =====================================================
+         TOP BAR
+         ===================================================== -->
+
+    <header class="topbar">
+
+        <div class="brand">
+
+            <div class="brand-name">
+                5paisa Trading Dashboard
+            </div>
+
+            <div
+                id="connection-status"
+                class="status disconnected"
+            >
+                ● Disconnected
+            </div>
+
+        </div>
+
+
+        <div class="controls">
+
+            <!-- SYMBOL -->
+
+            <div class="control-group">
+
+                <label for="symbol">
+                    Symbol
+                </label>
+
+                <select id="symbol">
+
+                    <option value="NIFTY">
+                        NIFTY
+                    </option>
+
+                    <option value="BANKNIFTY">
+                        BANKNIFTY
+                    </option>
+
+                    <option value="SENSEX">
+                        SENSEX
+                    </option>
+
+                    <option value="CRUDEOIL">
+                        CRUDEOIL
+                    </option>
+
+                    <option value="NATURALGAS">
+                        NATURALGAS
+                    </option>
+
+                </select>
+
+            </div>
+
+
+            <!-- EXPIRY -->
+
+            <div class="control-group">
+
+                <label for="expiry">
+                    Expiry
+                </label>
+
+                <select id="expiry">
+
+                    <option value="">
+                        Loading...
+                    </option>
+
+                </select>
+
+            </div>
+
+
+            <!-- TIMEFRAME -->
+
+            <div class="control-group">
+
+                <label for="timeframe">
+                    Timeframe
+                </label>
+
+                <select id="timeframe">
+
+                    <option value="1m">
+                        1m
+                    </option>
+
+                    <option value="3m">
+                        3m
+                    </option>
+
+                    <option
+                        value="5m"
+                        selected
+                    >
+                        5m
+                    </option>
+
+                    <option value="15m">
+                        15m
+                    </option>
+
+                    <option value="30m">
+                        30m
+                    </option>
+
+                    <option value="1h">
+                        1h
+                    </option>
+
+                    <option value="4h">
+                        4h
+                    </option>
+
+                    <option value="1d">
+                        1d
+                    </option>
+
+                </select>
+
+            </div>
+
+        </div>
+
+    </header>
+
+
+    <!-- =====================================================
+         MARKET INFORMATION
+         ===================================================== -->
+
+    <div class="market-bar">
+
+        <!-- FUTURE -->
+
+        <div class="market-info">
+
+            <span class="market-label">
+                FUTURE
+            </span>
+
+            <span
+                id="future-contract"
+                class="instrument-name"
+            >
+                -
+            </span>
+
+            <span
+                id="future-ltp"
+                class="ltp"
+            >
+                --
+            </span>
+
+        </div>
+
+
+        <!-- CALL -->
+
+        <div class="market-info">
+
+            <span class="market-label">
+                CALL
+            </span>
+
+            <span
+                id="call-contract"
+                class="instrument-name"
+            >
+                -
+            </span>
+
+            <span
+                id="call-ltp"
+                class="ltp"
+            >
+                --
+            </span>
+
+        </div>
+
+
+        <!-- PUT -->
+
+        <div class="market-info">
+
+            <span class="market-label">
+                PUT
+            </span>
+
+            <span
+                id="put-contract"
+                class="instrument-name"
+            >
+                -
+            </span>
+
+            <span
+                id="put-ltp"
+                class="ltp"
+            >
+                --
+            </span>
+
+        </div>
+
+    </div>
+
+
+    <!-- =====================================================
+         MAIN CHART AREA
+         ===================================================== -->
+
+    <main class="chart-layout">
+
+        <!-- =================================================
+             FUTURE CHART
+             ================================================= -->
+
+        <section class="chart-panel future-panel">
+
+            <div class="chart-header">
+
+                <div>
+
+                    <span class="chart-title">
+                        FUTURE
+                    </span>
+
+                    <span
+                        id="future-symbol"
+                        class="contract-name"
+                    >
+                        -
+                    </span>
+
+                </div>
+
+
+                <div class="chart-actions">
+
+                    <span class="indicator-label">
+                        SHA
+                    </span>
+
+                    <span class="selector-label">
+                        Future
+                    </span>
+
+                </div>
+
+            </div>
+
+
+            <div
+                id="future-chart"
+                class="chart-container"
+            >
+
+                <canvas
+                    id="future-canvas"
+                ></canvas>
+
+                <div
+                    id="future-loading"
+                    class="chart-loading"
+                >
+                    Waiting for market data...
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- =================================================
+             CALL CHART
+             ================================================= -->
+
+        <section class="chart-panel call-panel">
+
+            <div class="chart-header">
+
+                <div>
+
+                    <span class="chart-title">
+                        CALL
+                    </span>
+
+                    <span
+                        id="call-symbol"
+                        class="contract-name"
+                    >
+                        -
+                    </span>
+
+                </div>
+
+
+                <div class="chart-actions">
+
+                    <span class="indicator-label">
+                        SHA
+                    </span>
+
+                    <span class="selector-label">
+                        OTM
+                    </span>
+
+                    <select
+                        id="call-selector"
+                        aria-label="Call contract"
+                    >
+
+                        <option value="">
+                            Loading...
+                        </option>
+
+                    </select>
+
+                </div>
+
+            </div>
+
+
+            <div
+                id="call-chart"
+                class="chart-container"
+            >
+
+                <canvas
+                    id="call-canvas"
+                ></canvas>
+
+                <div
+                    id="call-loading"
+                    class="chart-loading"
+                >
+                    Waiting for market data...
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- =================================================
+             PUT CHART
+             ================================================= -->
+
+        <section class="chart-panel put-panel">
+
+            <div class="chart-header">
+
+                <div>
+
+                    <span class="chart-title">
+                        PUT
+                    </span>
+
+                    <span
+                        id="put-symbol"
+                        class="contract-name"
+                    >
+                        -
+                    </span>
+
+                </div>
+
+
+                <div class="chart-actions">
+
+                    <span class="indicator-label">
+                        SHA
+                    </span>
+
+                    <span class="selector-label">
+                        OTM
+                    </span>
+
+                    <select
+                        id="put-selector"
+                        aria-label="Put contract"
+                    >
+
+                        <option value="">
+                            Loading...
+                        </option>
+
+                    </select>
+
+                </div>
+
+            </div>
+
+
+            <div
+                id="put-chart"
+                class="chart-container"
+            >
+
+                <canvas
+                    id="put-canvas"
+                ></canvas>
+
+                <div
+                    id="put-loading"
+                    class="chart-loading"
+                >
+                    Waiting for market data...
+                </div>
+
+            </div>
+
+        </section>
+
+    </main>
+
+
+    <!-- =====================================================
+         JAVASCRIPT
+         ===================================================== -->
+
+    <script src="/app.js"></script>
+
+</body>
+
+</html>
