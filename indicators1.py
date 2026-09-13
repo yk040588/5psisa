@@ -1,53 +1,52 @@
 ```python
 """
-5paisa Trading Dashboard
-Phase 1 Technical Indicators
+Phase 1 Trading Dashboard - Technical Indicators
 
-SHA IMPLEMENTATION
-------------------
-This module implements our own Python version of the
-Smoothed Heiken Ashi calculation.
+Purpose
+-------
+Provides local technical-indicator calculations for the 5paisa dashboard.
 
-Reference calculation concept:
+Phase 1 SHA
+-----------
+Our own implementation inspired by the standard Heikin-Ashi + EMA concept.
 
+Pipeline:
     Raw OHLC
         ↓
-    BEFORE HA smoothing
-        EMA(10)
+    EMA smoothing of OHLC
         ↓
-    Heiken Ashi
+    Heikin-Ashi calculation
         ↓
-    AFTER HA smoothing
-        EMA(10)
-        ↓
-    Final SHA
+    SHA output
 
-The calculation is inspired by the mathematical pipeline of the
-provided Smoothed Heiken Ashi Pine Script, but this module does NOT
-use:
+There is NO TradingView dependency.
+There is NO TradingView API.
+There is NO paid indicator/library.
 
-    - TradingView
-    - TradingView API
-    - TradingView libraries
-    - wallneradam/TAExt
-    - any paid indicator
-    - any external indicator service
+The same SHA calculation is used independently for:
+    1. Future
+    2. Call
+    3. Put
 
-Everything is calculated locally in Python.
+Input candles are expected internally as:
 
-Phase 1 default:
-    Before HA length      = 10
-    Before HA MA          = EMA
-    After HA length       = 10
-    After HA MA           = EMA
+{
+    "timestamp": ...,
+    "open": ...,
+    "high": ...,
+    "low": ...,
+    "close": ...,
+    "volume": ...
+}
 
-The architecture supports SMA as an additional local MA option.
-EMA remains the Phase 1 default.
+The normalizer also accepts common 5paisa/Xstream field names such as:
+    Timestamp, Open, High, Low, Close, Volume
 
-Supported charts:
-    - Future
-    - Call
-    - Put
+The functions are deliberately pure/local so they work with:
+    - historical data
+    - cached data
+    - live-updated candles
+    - offline data already available locally
 """
 
 from __future__ import annotations
@@ -55,30 +54,18 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 
-# ============================================================================
-# DEFAULT SETTINGS
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
 
-DEFAULT_HA_SMOOTH_LENGTH = 10
-DEFAULT_HA_AFTER_SMOOTH_LENGTH = 10
+REQUIRED_OHLC = ("open", "high", "low", "close")
 
-DEFAULT_HA_SMOOTH_MA_TYPE = "EMA"
-DEFAULT_HA_AFTER_SMOOTH_MA_TYPE = "EMA"
-
-DEFAULT_RSI_PERIOD = 14
+DEFAULT_SHA_PERIOD = 3
 
 
-REQUIRED_OHLC = (
-    "open",
-    "high",
-    "low",
-    "close",
-)
-
-
-# ============================================================================
-# BASIC HELPERS
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Basic helpers
+# ---------------------------------------------------------------------------
 
 def _to_float(value: Any) -> float | None:
     """Safely convert a value to float."""
@@ -92,15 +79,11 @@ def _to_float(value: Any) -> float | None:
         return None
 
 
-def _get_value(
-    candle: dict[str, Any],
-    *names: str,
-) -> Any:
+def _get_value(candle: dict[str, Any], *names: str) -> Any:
     """
-    Return the first available field.
+    Return the first available value from the supplied field names.
 
-    Supports both our internal fields and common
-    5paisa/Xstream fields.
+    Supports both our internal lowercase format and common Xstream names.
     """
 
     for name in names:
@@ -110,45 +93,25 @@ def _get_value(
     return None
 
 
-def _get_timestamp(
-    candle: dict[str, Any],
-) -> Any:
-    """Extract timestamp from a candle."""
+def _get_timestamp(candle: dict[str, Any]) -> Any:
+    """Extract timestamp from internal or Xstream-style candle data."""
 
     return _get_value(
         candle,
         "timestamp",
-        "Timestamp",
         "time",
+        "Timestamp",
         "Time",
         "datetime",
         "DateTime",
     )
 
 
-def _validate_period(period: int) -> int:
-    """Validate moving-average period."""
-
-    if not isinstance(period, int):
-        raise TypeError("period must be an integer")
-
-    if period <= 0:
-        raise ValueError("period must be greater than zero")
-
-    return period
-
-
-# ============================================================================
-# CANDLE NORMALIZATION
-# ============================================================================
-
-def normalize_candle(
-    candle: dict[str, Any],
-) -> dict[str, Any]:
+def normalize_candle(candle: dict[str, Any]) -> dict[str, Any]:
     """
-    Normalize one candle.
+    Normalize one candle into the dashboard's internal format.
 
-    Internal format:
+    Supported input examples:
 
         {
             "timestamp": ...,
@@ -159,53 +122,32 @@ def normalize_candle(
             "volume": ...
         }
 
-    Supports Xstream-style fields:
+    or Xstream-style:
 
-        Timestamp
-        Open
-        High
-        Low
-        Close
-        Volume
+        {
+            "Timestamp": ...,
+            "Open": ...,
+            "High": ...,
+            "Low": ...,
+            "Close": ...,
+            "Volume": ...
+        }
     """
 
     if not isinstance(candle, dict):
-        raise TypeError("candle must be a dictionary")
+        raise TypeError("Candle must be a dictionary.")
 
     open_price = _to_float(
-        _get_value(
-            candle,
-            "open",
-            "Open",
-            "OPEN",
-        )
+        _get_value(candle, "open", "Open", "OPEN")
     )
-
     high_price = _to_float(
-        _get_value(
-            candle,
-            "high",
-            "High",
-            "HIGH",
-        )
+        _get_value(candle, "high", "High", "HIGH")
     )
-
     low_price = _to_float(
-        _get_value(
-            candle,
-            "low",
-            "Low",
-            "LOW",
-        )
+        _get_value(candle, "low", "Low", "LOW")
     )
-
     close_price = _to_float(
-        _get_value(
-            candle,
-            "close",
-            "Close",
-            "CLOSE",
-        )
+        _get_value(candle, "close", "Close", "CLOSE")
     )
 
     if (
@@ -228,7 +170,7 @@ def normalize_candle(
         )
     )
 
-    result: dict[str, Any] = {
+    normalized: dict[str, Any] = {
         "timestamp": _get_timestamp(candle),
         "open": open_price,
         "high": high_price,
@@ -237,9 +179,9 @@ def normalize_candle(
     }
 
     if volume is not None:
-        result["volume"] = volume
+        normalized["volume"] = volume
 
-    return result
+    return normalized
 
 
 def normalize_candles(
@@ -250,25 +192,40 @@ def normalize_candles(
     if candles is None:
         return []
 
-    return [
-        normalize_candle(candle)
-        for candle in candles
-    ]
+    result: list[dict[str, Any]] = []
+
+    for candle in candles:
+        result.append(normalize_candle(candle))
+
+    return result
 
 
-# ============================================================================
-# SIMPLE MOVING AVERAGE
-# ============================================================================
+def _validate_period(period: int) -> int:
+    """Validate an indicator period."""
+
+    if not isinstance(period, int):
+        raise TypeError("Period must be an integer.")
+
+    if period <= 0:
+        raise ValueError("Period must be greater than zero.")
+
+    return period
+
+
+# ---------------------------------------------------------------------------
+# Simple Moving Average
+# ---------------------------------------------------------------------------
 
 def sma(
     values: Iterable[float | None],
     period: int,
 ) -> list[float | None]:
     """
-    Simple Moving Average.
+    Calculate Simple Moving Average.
+
+    Until enough values are available, None is returned.
 
     Example:
-
         values = [10, 20, 30]
         period = 2
 
@@ -279,15 +236,11 @@ def sma(
 
     source = list(values)
 
-    result: list[float | None] = [
-        None
-        for _ in source
-    ]
+    result: list[float | None] = [None] * len(source)
 
     window: list[float] = []
 
     for index, value in enumerate(source):
-
         if value is None:
             window.clear()
             continue
@@ -298,49 +251,42 @@ def sma(
             window.pop(0)
 
         if len(window) == period:
-            result[index] = (
-                sum(window) / period
-            )
+            result[index] = sum(window) / period
 
     return result
 
 
-# ============================================================================
-# EXPONENTIAL MOVING AVERAGE
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Exponential Moving Average
+# ---------------------------------------------------------------------------
 
 def ema(
     values: Iterable[float | None],
     period: int,
 ) -> list[float | None]:
     """
-    Exponential Moving Average.
+    Calculate EMA using SMA seeding.
 
-    EMA multiplier:
+    Formula after the initial seed:
+
+        EMA = (Value - Previous EMA) * Multiplier + Previous EMA
+
+    Multiplier:
 
         2 / (period + 1)
 
-    The first EMA value is seeded using the SMA
-    of the first complete period.
+    The first EMA value is seeded from the first complete SMA period.
 
-    This gives deterministic historical calculations.
+    This gives a stable and deterministic result for historical candles.
     """
 
     period = _validate_period(period)
 
     source = list(values)
 
-    result: list[float | None] = [
-        None
-        for _ in source
-    ]
+    result: list[float | None] = [None] * len(source)
 
-    if not source:
-        return result
-
-    multiplier = 2.0 / (
-        period + 1.0
-    )
+    multiplier = 2.0 / (period + 1.0)
 
     valid_values: list[float] = []
 
@@ -355,26 +301,19 @@ def ema(
 
         valid_values.append(current)
 
-        # Initial EMA seed.
+        # Initial EMA seed = SMA of first period values.
         if previous_ema is None:
 
             if len(valid_values) < period:
                 continue
 
-            previous_ema = (
-                sum(
-                    valid_values[-period:]
-                ) / period
-            )
-
+            previous_ema = sum(valid_values[-period:]) / period
             result[index] = previous_ema
-
             continue
 
+        # Standard recursive EMA.
         previous_ema = (
-            (
-                current - previous_ema
-            ) * multiplier
+            (current - previous_ema) * multiplier
             + previous_ema
         )
 
@@ -383,51 +322,15 @@ def ema(
     return result
 
 
-# ============================================================================
-# GENERIC MOVING AVERAGE
-# ============================================================================
-
-def moving_average(
-    values: Iterable[float | None],
-    period: int,
-    ma_type: str = "EMA",
-) -> list[float | None]:
-    """
-    Moving-average dispatcher.
-
-    Phase 1 supported:
-        EMA
-        SMA
-
-    EMA is the default because the provided SHA configuration
-    uses EMA.
-    """
-
-    ma_type = str(
-        ma_type
-    ).upper().strip()
-
-    if ma_type == "EMA":
-        return ema(values, period)
-
-    if ma_type == "SMA":
-        return sma(values, period)
-
-    raise ValueError(
-        f"Unsupported MA type: {ma_type}. "
-        "Phase 1 supports EMA and SMA."
-    )
-
-
-# ============================================================================
-# STANDARD HEIKEN ASHI
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Standard Heikin-Ashi
+# ---------------------------------------------------------------------------
 
 def heikin_ashi(
     candles: Iterable[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """
-    Calculate standard Heiken Ashi candles.
+    Calculate standard Heikin-Ashi candles.
 
     HA Close:
 
@@ -448,19 +351,19 @@ def heikin_ashi(
     HA Low:
 
         min(Low, HA Open, HA Close)
+
+    Original timestamp and volume are preserved.
     """
 
-    normalized = normalize_candles(
-        candles
-    )
+    normalized = normalize_candles(candles)
 
     if not normalized:
         return []
 
     result: list[dict[str, Any]] = []
 
-    previous_open: float | None = None
-    previous_close: float | None = None
+    previous_ha_open: float | None = None
+    previous_ha_close: float | None = None
 
     for candle in normalized:
 
@@ -476,18 +379,12 @@ def heikin_ashi(
             + close_price
         ) / 4.0
 
-        if previous_open is None:
-
-            ha_open = (
-                open_price
-                + close_price
-            ) / 2.0
-
+        if previous_ha_open is None:
+            ha_open = (open_price + close_price) / 2.0
         else:
-
             ha_open = (
-                previous_open
-                + previous_close
+                previous_ha_open
+                + previous_ha_close
             ) / 2.0
 
         ha_high = max(
@@ -502,10 +399,8 @@ def heikin_ashi(
             ha_close,
         )
 
-        result_candle: dict[str, Any] = {
-            "timestamp": candle.get(
-                "timestamp"
-            ),
+        output: dict[str, Any] = {
+            "timestamp": candle.get("timestamp"),
             "open": ha_open,
             "high": ha_high,
             "low": ha_low,
@@ -513,341 +408,154 @@ def heikin_ashi(
         }
 
         if "volume" in candle:
-            result_candle["volume"] = (
-                candle["volume"]
-            )
-
-        result.append(result_candle)
-
-        previous_open = ha_open
-        previous_close = ha_close
-
-    return result
-
-
-# ============================================================================
-# STAGE 1 - BEFORE HA SMOOTHING
-# ============================================================================
-
-def smooth_ohlc_before_ha(
-    candles: Iterable[dict[str, Any]],
-    smooth_length: int = DEFAULT_HA_SMOOTH_LENGTH,
-    smooth_ma_type: str = DEFAULT_HA_SMOOTH_MA_TYPE,
-) -> list[dict[str, Any]]:
-    """
-    Stage 1 of our SHA.
-
-    Raw OHLC
-        ↓
-    Moving average
-        ↓
-    Smoothed OHLC
-
-    Default:
-
-        length = 10
-        MA = EMA
-    """
-
-    smooth_length = _validate_period(
-        smooth_length
-    )
-
-    normalized = normalize_candles(
-        candles
-    )
-
-    if not normalized:
-        return []
-
-    opens = [
-        candle["open"]
-        for candle in normalized
-    ]
-
-    highs = [
-        candle["high"]
-        for candle in normalized
-    ]
-
-    lows = [
-        candle["low"]
-        for candle in normalized
-    ]
-
-    closes = [
-        candle["close"]
-        for candle in normalized
-    ]
-
-    smooth_open = moving_average(
-        opens,
-        smooth_length,
-        smooth_ma_type,
-    )
-
-    smooth_high = moving_average(
-        highs,
-        smooth_length,
-        smooth_ma_type,
-    )
-
-    smooth_low = moving_average(
-        lows,
-        smooth_length,
-        smooth_ma_type,
-    )
-
-    smooth_close = moving_average(
-        closes,
-        smooth_length,
-        smooth_ma_type,
-    )
-
-    result: list[dict[str, Any]] = []
-
-    for index, candle in enumerate(
-        normalized
-    ):
-
-        o = smooth_open[index]
-        h = smooth_high[index]
-        l = smooth_low[index]
-        c = smooth_close[index]
-
-        if (
-            o is None
-            or h is None
-            or l is None
-            or c is None
-        ):
-            continue
-
-        output: dict[str, Any] = {
-            "timestamp": candle.get(
-                "timestamp"
-            ),
-            "open": o,
-            "high": h,
-            "low": l,
-            "close": c,
-        }
-
-        if "volume" in candle:
-            output["volume"] = (
-                candle["volume"]
-            )
+            output["volume"] = candle["volume"]
 
         result.append(output)
 
-    return result
-
-
-# ============================================================================
-# STAGE 2 - AFTER HA SMOOTHING
-# ============================================================================
-
-def smooth_ha_after(
-    ha_candles: Iterable[dict[str, Any]],
-    after_smooth_length: int = (
-        DEFAULT_HA_AFTER_SMOOTH_LENGTH
-    ),
-    after_smooth_ma_type: str = (
-        DEFAULT_HA_AFTER_SMOOTH_MA_TYPE
-    ),
-) -> list[dict[str, Any]]:
-    """
-    Stage 2 of our SHA.
-
-    Heiken Ashi
-        ↓
-    Moving average
-        ↓
-    Final Smoothed Heiken Ashi
-    """
-
-    after_smooth_length = _validate_period(
-        after_smooth_length
-    )
-
-    normalized = normalize_candles(
-        ha_candles
-    )
-
-    if not normalized:
-        return []
-
-    opens = [
-        candle["open"]
-        for candle in normalized
-    ]
-
-    highs = [
-        candle["high"]
-        for candle in normalized
-    ]
-
-    lows = [
-        candle["low"]
-        for candle in normalized
-    ]
-
-    closes = [
-        candle["close"]
-        for candle in normalized
-    ]
-
-    smooth_open = moving_average(
-        opens,
-        after_smooth_length,
-        after_smooth_ma_type,
-    )
-
-    smooth_high = moving_average(
-        highs,
-        after_smooth_length,
-        after_smooth_ma_type,
-    )
-
-    smooth_low = moving_average(
-        lows,
-        after_smooth_length,
-        after_smooth_ma_type,
-    )
-
-    smooth_close = moving_average(
-        closes,
-        after_smooth_length,
-        after_smooth_ma_type,
-    )
-
-    result: list[dict[str, Any]] = []
-
-    for index, candle in enumerate(
-        normalized
-    ):
-
-        o = smooth_open[index]
-        h = smooth_high[index]
-        l = smooth_low[index]
-        c = smooth_close[index]
-
-        if (
-            o is None
-            or h is None
-            or l is None
-            or c is None
-        ):
-            continue
-
-        output: dict[str, Any] = {
-            "timestamp": candle.get(
-                "timestamp"
-            ),
-            "open": o,
-            "high": h,
-            "low": l,
-            "close": c,
-        }
-
-        if "volume" in candle:
-            output["volume"] = (
-                candle["volume"]
-            )
-
-        result.append(output)
+        previous_ha_open = ha_open
+        previous_ha_close = ha_close
 
     return result
 
 
-# ============================================================================
-# FINAL SHA
-# ============================================================================
+# ---------------------------------------------------------------------------
+# SHA - Our Phase 1 implementation
+# ---------------------------------------------------------------------------
 
 def smoothed_heikin_ashi(
     candles: Iterable[dict[str, Any]],
-    smooth_length: int = DEFAULT_HA_SMOOTH_LENGTH,
-    smooth_ma_type: str = DEFAULT_HA_SMOOTH_MA_TYPE,
-    after_smooth_length: int = (
-        DEFAULT_HA_AFTER_SMOOTH_LENGTH
-    ),
-    after_smooth_ma_type: str = (
-        DEFAULT_HA_AFTER_SMOOTH_MA_TYPE
-    ),
+    smoothing_period: int = DEFAULT_SHA_PERIOD,
+    smoothing_method: str = "ema",
 ) -> list[dict[str, Any]]:
     """
-    Calculate Phase 1 Smoothed Heiken Ashi.
+    Calculate our Phase 1 Smoothed Heikin-Ashi (SHA).
 
-    FINAL PIPELINE:
+    IMPORTANT
+    ---------
+    This is our own local implementation.
+
+    It uses the well-known mathematical concepts of:
+        1. OHLC smoothing
+        2. Heikin-Ashi calculation
+
+    No TradingView code, API, library or paid service is used.
+
+    Pipeline:
 
         Raw OHLC
-             ↓
-        BEFORE HA
-        EMA(10)
-             ↓
-        Heiken Ashi
-             ↓
-        AFTER HA
-        EMA(10)
-             ↓
-        FINAL SHA
+            ↓
+        EMA/SMA smoothing
+            ↓
+        Heikin-Ashi
+            ↓
+        SHA candles
+
+    Parameters
+    ----------
+    candles:
+        Raw OHLC candles.
+
+    smoothing_period:
+        Default = 3.
+
+    smoothing_method:
+        "ema" or "sma"
+
+    Returns
+    -------
+    list[dict]
+        SHA candles with:
+            timestamp
+            open
+            high
+            low
+            close
+            volume (when available)
     """
 
-    # ------------------------------------------------------------
-    # Stage 1
-    # ------------------------------------------------------------
+    period = _validate_period(smoothing_period)
 
-    before_ha = smooth_ohlc_before_ha(
-        candles,
-        smooth_length=smooth_length,
-        smooth_ma_type=smooth_ma_type,
-    )
+    method = str(smoothing_method).lower().strip()
 
-    if not before_ha:
+    if method not in {"ema", "sma"}:
+        raise ValueError(
+            "smoothing_method must be either 'ema' or 'sma'."
+        )
+
+    normalized = normalize_candles(candles)
+
+    if not normalized:
         return []
 
-    # ------------------------------------------------------------
-    # Heiken Ashi
-    # ------------------------------------------------------------
+    opens = [candle["open"] for candle in normalized]
+    highs = [candle["high"] for candle in normalized]
+    lows = [candle["low"] for candle in normalized]
+    closes = [candle["close"] for candle in normalized]
 
-    ha = heikin_ashi(
-        before_ha
-    )
+    if method == "ema":
+        smooth_open = ema(opens, period)
+        smooth_high = ema(highs, period)
+        smooth_low = ema(lows, period)
+        smooth_close = ema(closes, period)
+    else:
+        smooth_open = sma(opens, period)
+        smooth_high = sma(highs, period)
+        smooth_low = sma(lows, period)
+        smooth_close = sma(closes, period)
 
-    if not ha:
+    smoothed_ohlc: list[dict[str, Any]] = []
+
+    for index, candle in enumerate(normalized):
+
+        o = smooth_open[index]
+        h = smooth_high[index]
+        l = smooth_low[index]
+        c = smooth_close[index]
+
+        # Initial smoothing period does not have a complete value.
+        if (
+            o is None
+            or h is None
+            or l is None
+            or c is None
+        ):
+            continue
+
+        smoothed_ohlc.append(
+            {
+                "timestamp": candle.get("timestamp"),
+                "open": o,
+                "high": h,
+                "low": l,
+                "close": c,
+                **(
+                    {"volume": candle["volume"]}
+                    if "volume" in candle
+                    else {}
+                ),
+            }
+        )
+
+    if not smoothed_ohlc:
         return []
 
-    # ------------------------------------------------------------
-    # Stage 2
-    # ------------------------------------------------------------
-
-    final_sha = smooth_ha_after(
-        ha,
-        after_smooth_length=after_smooth_length,
-        after_smooth_ma_type=after_smooth_ma_type,
-    )
-
-    return final_sha
+    return heikin_ashi(smoothed_ohlc)
 
 
-# ============================================================================
-# SHA DIRECTION
-# ============================================================================
+# ---------------------------------------------------------------------------
+# SHA with direction
+# ---------------------------------------------------------------------------
 
 def add_sha_direction(
     candles: Iterable[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """
-    Add bullish/bearish/neutral direction.
+    Add candle direction to SHA candles.
 
-    Bullish:
-        close > open
-
-    Bearish:
-        close < open
-
-    Neutral:
-        close == open
+    direction:
+        "bullish"
+        "bearish"
+        "neutral"
     """
 
     result: list[dict[str, Any]] = []
@@ -856,20 +564,13 @@ def add_sha_direction(
 
         output = dict(candle)
 
-        open_price = float(
-            candle["open"]
-        )
-
-        close_price = float(
-            candle["close"]
-        )
+        open_price = candle["open"]
+        close_price = candle["close"]
 
         if close_price > open_price:
             direction = "bullish"
-
         elif close_price < open_price:
             direction = "bearish"
-
         else:
             direction = "neutral"
 
@@ -880,63 +581,53 @@ def add_sha_direction(
     return result
 
 
+# ---------------------------------------------------------------------------
+# Combined SHA
+# ---------------------------------------------------------------------------
+
 def add_sha(
     candles: Iterable[dict[str, Any]],
-    smooth_length: int = DEFAULT_HA_SMOOTH_LENGTH,
-    smooth_ma_type: str = DEFAULT_HA_SMOOTH_MA_TYPE,
-    after_smooth_length: int = (
-        DEFAULT_HA_AFTER_SMOOTH_LENGTH
-    ),
-    after_smooth_ma_type: str = (
-        DEFAULT_HA_AFTER_SMOOTH_MA_TYPE
-    ),
+    smoothing_period: int = DEFAULT_SHA_PERIOD,
+    smoothing_method: str = "ema",
 ) -> list[dict[str, Any]]:
     """
-    Calculate final SHA and add direction.
+    Calculate SHA and add bullish/bearish direction.
     """
 
     sha = smoothed_heikin_ashi(
         candles,
-        smooth_length=smooth_length,
-        smooth_ma_type=smooth_ma_type,
-        after_smooth_length=after_smooth_length,
-        after_smooth_ma_type=after_smooth_ma_type,
+        smoothing_period=smoothing_period,
+        smoothing_method=smoothing_method,
     )
 
-    return add_sha_direction(
-        sha
-    )
+    return add_sha_direction(sha)
 
 
-# ============================================================================
-# CANDLE DIRECTION
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Candle direction
+# ---------------------------------------------------------------------------
 
 def candle_direction(
     candle: dict[str, Any],
 ) -> str:
-    """Return bullish, bearish or neutral."""
+    """
+    Return direction of a candle.
+
+    Returns:
+        bullish
+        bearish
+        neutral
+    """
 
     open_price = _to_float(
-        _get_value(
-            candle,
-            "open",
-            "Open",
-        )
+        _get_value(candle, "open", "Open")
     )
 
     close_price = _to_float(
-        _get_value(
-            candle,
-            "close",
-            "Close",
-        )
+        _get_value(candle, "close", "Close")
     )
 
-    if (
-        open_price is None
-        or close_price is None
-    ):
+    if open_price is None or close_price is None:
         raise ValueError(
             "Candle must contain valid open and close values."
         )
@@ -950,31 +641,30 @@ def candle_direction(
     return "neutral"
 
 
-# ============================================================================
-# DASHBOARD SHA
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Dashboard SHA
+# ---------------------------------------------------------------------------
 
 def calculate_dashboard_sha(
     future_candles: Iterable[dict[str, Any]] | None = None,
     call_candles: Iterable[dict[str, Any]] | None = None,
     put_candles: Iterable[dict[str, Any]] | None = None,
-    smooth_length: int = DEFAULT_HA_SMOOTH_LENGTH,
-    smooth_ma_type: str = DEFAULT_HA_SMOOTH_MA_TYPE,
-    after_smooth_length: int = (
-        DEFAULT_HA_AFTER_SMOOTH_LENGTH
-    ),
-    after_smooth_ma_type: str = (
-        DEFAULT_HA_AFTER_SMOOTH_MA_TYPE
-    ),
+    smoothing_period: int = DEFAULT_SHA_PERIOD,
+    smoothing_method: str = "ema",
 ) -> dict[str, list[dict[str, Any]]]:
     """
-    Calculate independent SHA for:
+    Calculate SHA independently for all three Phase 1 charts.
 
-        Future
-        Call
-        Put
+    Future:
+        Future candles → Future SHA
 
-    Each chart receives its own complete SHA pipeline.
+    Call:
+        Selected Call candles → Call SHA
+
+    Put:
+        Selected Put candles → Put SHA
+
+    Each chart has its own independent SHA calculation.
     """
 
     future = (
@@ -998,53 +688,46 @@ def calculate_dashboard_sha(
     return {
         "future": add_sha(
             future,
-            smooth_length=smooth_length,
-            smooth_ma_type=smooth_ma_type,
-            after_smooth_length=after_smooth_length,
-            after_smooth_ma_type=after_smooth_ma_type,
+            smoothing_period=smoothing_period,
+            smoothing_method=smoothing_method,
         ),
-
         "call": add_sha(
             call,
-            smooth_length=smooth_length,
-            smooth_ma_type=smooth_ma_type,
-            after_smooth_length=after_smooth_length,
-            after_smooth_ma_type=after_smooth_ma_type,
+            smoothing_period=smoothing_period,
+            smoothing_method=smoothing_method,
         ),
-
         "put": add_sha(
             put,
-            smooth_length=smooth_length,
-            smooth_ma_type=smooth_ma_type,
-            after_smooth_length=after_smooth_length,
-            after_smooth_ma_type=after_smooth_ma_type,
+            smoothing_period=smoothing_period,
+            smoothing_method=smoothing_method,
         ),
     }
 
 
-# ============================================================================
-# LATEST SHA
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Utility: latest SHA candle
+# ---------------------------------------------------------------------------
 
 def latest_sha(
     candles: Iterable[dict[str, Any]],
-    smooth_length: int = DEFAULT_HA_SMOOTH_LENGTH,
-    smooth_ma_type: str = DEFAULT_HA_SMOOTH_MA_TYPE,
-    after_smooth_length: int = (
-        DEFAULT_HA_AFTER_SMOOTH_LENGTH
-    ),
-    after_smooth_ma_type: str = (
-        DEFAULT_HA_AFTER_SMOOTH_MA_TYPE
-    ),
+    smoothing_period: int = DEFAULT_SHA_PERIOD,
+    smoothing_method: str = "ema",
 ) -> dict[str, Any] | None:
-    """Return the latest SHA candle."""
+    """
+    Return the latest SHA candle.
+
+    Useful for:
+        - dashboard status
+        - future SHA state
+        - call SHA state
+        - put SHA state
+        - future live-candle updates
+    """
 
     result = add_sha(
         candles,
-        smooth_length=smooth_length,
-        smooth_ma_type=smooth_ma_type,
-        after_smooth_length=after_smooth_length,
-        after_smooth_ma_type=after_smooth_ma_type,
+        smoothing_period=smoothing_period,
+        smoothing_method=smoothing_method,
     )
 
     if not result:
@@ -1053,9 +736,9 @@ def latest_sha(
     return result[-1]
 
 
-# ============================================================================
-# LIVE CANDLE UPDATE
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Utility: update last candle
+# ---------------------------------------------------------------------------
 
 def update_last_candle(
     candles: Iterable[dict[str, Any]],
@@ -1066,16 +749,21 @@ def update_last_candle(
     volume: float | None = None,
 ) -> list[dict[str, Any]]:
     """
-    Update the currently forming candle.
+    Return a copy of the candle list with the latest candle updated.
 
-    This is useful for Xstream live ticks.
+    This is useful when a live Xstream tick changes the currently forming
+    candle.
 
-    The input list is copied; the original list is not modified.
+    Rules:
+        close → latest close
+        high  → max(current high, supplied high)
+        low   → min(current low, supplied low)
+        volume → supplied volume when available
+
+    The original input list is never modified.
     """
 
-    result = normalize_candles(
-        candles
-    )
+    result = normalize_candles(candles)
 
     if not result:
         return result
@@ -1083,11 +771,11 @@ def update_last_candle(
     last = result[-1]
 
     if close is not None:
-
         close_value = float(close)
-
         last["close"] = close_value
 
+        # If only LTP/close is received, the current candle's
+        # high/low must still contain the new price.
         last["high"] = max(
             float(last["high"]),
             close_value,
@@ -1099,184 +787,35 @@ def update_last_candle(
         )
 
     if high is not None:
-
         last["high"] = max(
             float(last["high"]),
             float(high),
         )
 
     if low is not None:
-
         last["low"] = min(
             float(last["low"]),
             float(low),
         )
 
     if volume is not None:
-        last["volume"] = float(
-            volume
-        )
+        last["volume"] = float(volume)
 
     return result
 
 
-# ============================================================================
-# RSI
-# ============================================================================
-
-def rsi(
-    values: Iterable[float],
-    period: int = DEFAULT_RSI_PERIOD,
-) -> list[float | None]:
-    """
-    Calculate RSI using Wilder-style smoothing.
-
-    RSI is included as a reusable Phase 1 utility.
-    SHA remains the primary chart indicator.
-    """
-
-    period = _validate_period(
-        period
-    )
-
-    source = [
-        float(value)
-        for value in values
-    ]
-
-    if len(source) <= period:
-        return []
-
-    result: list[float | None] = [
-        None
-        for _ in source
-    ]
-
-    gain = 0.0
-    loss = 0.0
-
-    for index in range(
-        1,
-        period + 1,
-    ):
-
-        change = (
-            source[index]
-            - source[index - 1]
-        )
-
-        if change >= 0:
-            gain += change
-        else:
-            loss -= change
-
-    average_gain = (
-        gain / period
-    )
-
-    average_loss = (
-        loss / period
-    )
-
-    if average_loss == 0:
-        result[period] = 100.0
-    else:
-        relative_strength = (
-            average_gain
-            / average_loss
-        )
-
-        result[period] = (
-            100.0
-            - (
-                100.0
-                / (
-                    1.0
-                    + relative_strength
-                )
-            )
-        )
-
-    for index in range(
-        period + 1,
-        len(source),
-    ):
-
-        change = (
-            source[index]
-            - source[index - 1]
-        )
-
-        current_gain = (
-            change
-            if change > 0
-            else 0.0
-        )
-
-        current_loss = (
-            -change
-            if change < 0
-            else 0.0
-        )
-
-        average_gain = (
-            (
-                average_gain
-                * (period - 1)
-            )
-            + current_gain
-        ) / period
-
-        average_loss = (
-            (
-                average_loss
-                * (period - 1)
-            )
-            + current_loss
-        ) / period
-
-        if average_loss == 0:
-            result[index] = 100.0
-        else:
-
-            relative_strength = (
-                average_gain
-                / average_loss
-            )
-
-            result[index] = (
-                100.0
-                - (
-                    100.0
-                    / (
-                        1.0
-                        + relative_strength
-                    )
-                )
-            )
-
-    return result
-
-
-# ============================================================================
-# PUBLIC EXPORTS
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Public exports
+# ---------------------------------------------------------------------------
 
 __all__ = [
-    "DEFAULT_HA_SMOOTH_LENGTH",
-    "DEFAULT_HA_AFTER_SMOOTH_LENGTH",
-    "DEFAULT_HA_SMOOTH_MA_TYPE",
-    "DEFAULT_HA_AFTER_SMOOTH_MA_TYPE",
-    "DEFAULT_RSI_PERIOD",
     "REQUIRED_OHLC",
+    "DEFAULT_SHA_PERIOD",
     "normalize_candle",
     "normalize_candles",
     "sma",
     "ema",
-    "moving_average",
     "heikin_ashi",
-    "smooth_ohlc_before_ha",
-    "smooth_ha_after",
     "smoothed_heikin_ashi",
     "add_sha_direction",
     "add_sha",
@@ -1284,6 +823,5 @@ __all__ = [
     "calculate_dashboard_sha",
     "latest_sha",
     "update_last_candle",
-    "rsi",
 ]
 ```
