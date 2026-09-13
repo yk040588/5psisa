@@ -1,6 +1,6 @@
 # ---------------------------------------------------------
-# FRONTEND FILES
-# ---------------------------------------------------------
+# FRONTEND FILEShgfhgfgdfgd
+# ----------------------------------- ----------------------
 
 @app.get("/app.js")
 async def frontend_app_js():
@@ -9,7 +9,7 @@ async def frontend_app_js():
         media_type="application/javascript",
     )
 
-
+  
 @app.get("/charts.js")
 async def frontend_charts_js():
     return FileResponse(
