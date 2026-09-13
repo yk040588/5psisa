@@ -1,8 +1,7 @@
-```javascript
 /* =========================================================
-   TRADING DASHBOARD
+   5PAISA TRADING DASHBOARD
    app.js
-   Main application state and UI coordination
+   PHASE 1
    ========================================================= */
 
 "use strict";
@@ -33,17 +32,17 @@ const appState = {
 
     timeframe: "5m",
 
-    call: "",
+    future: null,
 
-    put: "",
+    call: null,
 
-    future: "",
-
-    connected: false,
+    put: null,
 
     dashboard: null,
 
-    initialized: false
+    initialized: false,
+
+    connected: false
 
 };
 
@@ -54,15 +53,20 @@ const appState = {
 
 const elements = {
 
-    symbol: document.getElementById("symbol"),
+    symbol:
+        document.getElementById("symbol"),
 
-    expiry: document.getElementById("expiry"),
+    expiry:
+        document.getElementById("expiry"),
 
-    timeframe: document.getElementById("timeframe"),
+    timeframe:
+        document.getElementById("timeframe"),
 
-    callSelector: document.getElementById("call-selector"),
+    callSelector:
+        document.getElementById("call-selector"),
 
-    putSelector: document.getElementById("put-selector"),
+    putSelector:
+        document.getElementById("put-selector"),
 
     connectionStatus:
         document.getElementById("connection-status"),
@@ -70,14 +74,11 @@ const elements = {
     futureSymbol:
         document.getElementById("future-symbol"),
 
-    futureLtp:
-        document.getElementById("future-ltp"),
+    callSymbol:
+        document.getElementById("call-symbol"),
 
-    callLtp:
-        document.getElementById("call-ltp"),
-
-    putLtp:
-        document.getElementById("put-ltp"),
+    putSymbol:
+        document.getElementById("put-symbol"),
 
     futureContract:
         document.getElementById("future-contract"),
@@ -88,6 +89,15 @@ const elements = {
     putContract:
         document.getElementById("put-contract"),
 
+    futureLtp:
+        document.getElementById("future-ltp"),
+
+    callLtp:
+        document.getElementById("call-ltp"),
+
+    putLtp:
+        document.getElementById("put-ltp"),
+
     futureChart:
         document.getElementById("future-chart"),
 
@@ -95,7 +105,25 @@ const elements = {
         document.getElementById("call-chart"),
 
     putChart:
-        document.getElementById("put-chart")
+        document.getElementById("put-chart"),
+
+    futureCanvas:
+        document.getElementById("future-canvas"),
+
+    callCanvas:
+        document.getElementById("call-canvas"),
+
+    putCanvas:
+        document.getElementById("put-canvas"),
+
+    futureLoading:
+        document.getElementById("future-loading"),
+
+    callLoading:
+        document.getElementById("call-loading"),
+
+    putLoading:
+        document.getElementById("put-loading")
 
 };
 
@@ -104,11 +132,10 @@ const elements = {
    INITIALIZATION
    ========================================================= */
 
-document.addEventListener("DOMContentLoaded", () => {
-
-    initializeApplication();
-
-});
+document.addEventListener(
+    "DOMContentLoaded",
+    initializeApplication
+);
 
 
 async function initializeApplication() {
@@ -123,7 +150,42 @@ async function initializeApplication() {
 
     readInitialControls();
 
+    setConnectionStatus(false);
+
     await loadDashboard();
+
+}
+
+
+/* =========================================================
+   INITIAL CONTROLS
+   ========================================================= */
+
+function readInitialControls() {
+
+    if (elements.symbol) {
+
+        const selected =
+            elements.symbol.value;
+
+        appState.symbol =
+            SUPPORTED_SYMBOLS.includes(selected)
+                ? selected
+                : "NIFTY";
+
+        elements.symbol.value =
+            appState.symbol;
+    }
+
+
+    if (elements.timeframe) {
+
+        appState.timeframe =
+            elements.timeframe.value || "5m";
+
+        elements.timeframe.value =
+            appState.timeframe;
+    }
 
 }
 
@@ -187,46 +249,41 @@ function bindEvents() {
 
 
 /* =========================================================
-   INITIAL CONTROL VALUES
-   ========================================================= */
-
-function readInitialControls() {
-
-    if (elements.symbol) {
-        appState.symbol =
-            elements.symbol.value || "NIFTY";
-    }
-
-    if (elements.timeframe) {
-        appState.timeframe =
-            elements.timeframe.value || "5m";
-    }
-
-}
-
-
-/* =========================================================
    SYMBOL CHANGE
    ========================================================= */
 
 async function handleSymbolChange(event) {
 
-    const newSymbol = event.target.value;
+    const newSymbol =
+        event.target.value;
 
     if (!SUPPORTED_SYMBOLS.includes(newSymbol)) {
+
+        event.target.value =
+            appState.symbol;
+
         return;
     }
 
-    appState.symbol = newSymbol;
 
-    appState.expiry = "";
-    appState.call = "";
-    appState.put = "";
-    appState.future = "";
+    appState.symbol =
+        newSymbol;
 
-    clearContractInformation();
+    appState.expiry =
+        "";
 
-    resetContractSelectors();
+    appState.future =
+        null;
+
+    appState.call =
+        null;
+
+    appState.put =
+        null;
+
+
+    clearDashboard();
+
 
     showChartLoading(
         "future",
@@ -235,13 +292,14 @@ async function handleSymbolChange(event) {
 
     showChartLoading(
         "call",
-        "Loading Calls..."
+        "Loading OTM Calls..."
     );
 
     showChartLoading(
         "put",
-        "Loading Puts..."
+        "Loading OTM Puts..."
     );
+
 
     await loadDashboard();
 
@@ -254,12 +312,18 @@ async function handleSymbolChange(event) {
 
 async function handleExpiryChange(event) {
 
-    appState.expiry = event.target.value;
+    appState.expiry =
+        event.target.value;
 
-    appState.call = "";
-    appState.put = "";
+    appState.call =
+        null;
+
+    appState.put =
+        null;
+
 
     resetContractSelectors();
+
 
     showChartLoading(
         "future",
@@ -268,13 +332,14 @@ async function handleExpiryChange(event) {
 
     showChartLoading(
         "call",
-        "Loading Calls..."
+        "Loading OTM Calls..."
     );
 
     showChartLoading(
         "put",
-        "Loading Puts..."
+        "Loading OTM Puts..."
     );
+
 
     await loadDashboard();
 
@@ -287,25 +352,12 @@ async function handleExpiryChange(event) {
 
 async function handleTimeframeChange(event) {
 
-    appState.timeframe = event.target.value;
+    appState.timeframe =
+        event.target.value || "5m";
 
-    /*
-     * We do not need to change the selected contracts.
-     * Only the candle timeframe changes.
-     */
 
-    if (typeof window.refreshCharts === "function") {
+    await refreshAllCharts();
 
-        window.refreshCharts({
-            timeframe: appState.timeframe
-        });
-
-    }
-
-    /*
-     * If charts.js does not yet implement refreshCharts,
-     * send the selection through the WebSocket layer.
-     */
 
     sendSelection();
 
@@ -318,23 +370,17 @@ async function handleTimeframeChange(event) {
 
 async function handleCallChange(event) {
 
-    appState.call = event.target.value;
+    appState.call =
+        getSelectedContract(
+            elements.callSelector
+        );
+
 
     updateContractLabels();
 
-    showChartLoading(
-        "call",
-        "Loading Call data..."
-    );
 
-    if (typeof window.refreshCallChart === "function") {
+    await refreshCallChart();
 
-        await window.refreshCallChart(
-            appState.call,
-            appState.timeframe
-        );
-
-    }
 
     sendSelection();
 
@@ -347,23 +393,17 @@ async function handleCallChange(event) {
 
 async function handlePutChange(event) {
 
-    appState.put = event.target.value;
+    appState.put =
+        getSelectedContract(
+            elements.putSelector
+        );
+
 
     updateContractLabels();
 
-    showChartLoading(
-        "put",
-        "Loading Put data..."
-    );
 
-    if (typeof window.refreshPutChart === "function") {
+    await refreshPutChart();
 
-        await window.refreshPutChart(
-            appState.put,
-            appState.timeframe
-        );
-
-    }
 
     sendSelection();
 
@@ -378,12 +418,15 @@ async function loadDashboard() {
 
     try {
 
-        const params = new URLSearchParams();
+        const params =
+            new URLSearchParams();
+
 
         params.set(
             "symbol",
             appState.symbol
         );
+
 
         if (appState.expiry) {
 
@@ -394,9 +437,11 @@ async function loadDashboard() {
 
         }
 
-        const response = await fetch(
-            `/api/dashboard?${params.toString()}`
-        );
+
+        const response =
+            await fetch(
+                `/api/dashboard?${params.toString()}`
+            );
 
 
         if (!response.ok) {
@@ -408,17 +453,25 @@ async function loadDashboard() {
         }
 
 
-        const data = await response.json();
+        const data =
+            await response.json();
 
-        appState.dashboard = data;
+
+        appState.dashboard =
+            data;
 
 
         processDashboardData(data);
 
 
-        /*
-         * Inform WebSocket layer about current selection.
-         */
+        setConnectionStatus(
+            Boolean(
+                data.connected ??
+                data.broker_connected ??
+                false
+            )
+        );
+
 
         sendSelection();
 
@@ -430,7 +483,24 @@ async function loadDashboard() {
             error
         );
 
-        handleDashboardError(error);
+
+        showChartLoading(
+            "future",
+            "Waiting for market data..."
+        );
+
+        showChartLoading(
+            "call",
+            "Waiting for market data..."
+        );
+
+        showChartLoading(
+            "put",
+            "Waiting for market data..."
+        );
+
+
+        setConnectionStatus(false);
 
     }
 
@@ -449,89 +519,116 @@ function processDashboardData(data) {
 
 
     /*
-     * Support the current backend structure
-     * as well as future expanded structures.
-     */
-
-    const futures =
-        data.futures ||
-        data.future ||
-        [];
-
-    const calls =
-        data.calls ||
-        data.call ||
-        [];
-
-    const puts =
-        data.puts ||
-        data.put ||
-        [];
-
-
-    /*
-     * ---------------------------------------------
      * EXPIRIES
-     * ---------------------------------------------
      */
 
     const expiries =
-        data.expiries ||
-        data.expiry ||
-        [];
+        Array.isArray(data.expiries)
+            ? data.expiries
+            : [];
 
 
-    if (Array.isArray(expiries)) {
-
-        populateExpirySelector(expiries);
-
-    }
+    populateExpirySelector(
+        expiries
+    );
 
 
     /*
-     * ---------------------------------------------
      * FUTURE
-     * ---------------------------------------------
      */
 
-    const future =
-        Array.isArray(futures)
+    const futures =
+        Array.isArray(data.futures)
+            ? data.futures
+            : (
+                data.future
+                    ? [data.future]
+                    : []
+            );
+
+
+    appState.future =
+        futures.length
             ? futures[0]
-            : futures;
-
-
-    if (future) {
-
-        appState.future =
-            getContractValue(future);
-
-        updateFutureInformation(future);
-
-    }
+            : null;
 
 
     /*
-     * ---------------------------------------------
      * CALLS
-     * ---------------------------------------------
      */
 
-    if (Array.isArray(calls)) {
+    const calls =
+        Array.isArray(data.calls)
+            ? data.calls
+            : (
+                data.call
+                    ? [data.call]
+                    : []
+            );
 
-        populateCallSelector(calls);
+
+    /*
+     * PUTS
+     */
+
+    const puts =
+        Array.isArray(data.puts)
+            ? data.puts
+            : (
+                data.put
+                    ? [data.put]
+                    : []
+            );
+
+
+    /*
+     * Populate OTM contract selectors.
+     *
+     * Backend should preferably return
+     * OTM contracts first / filtered.
+     */
+
+    populateContractSelector(
+        elements.callSelector,
+        calls,
+        appState.call
+    );
+
+
+    populateContractSelector(
+        elements.putSelector,
+        puts,
+        appState.put
+    );
+
+
+    /*
+     * Automatically select first OTM
+     * contract returned by backend.
+     */
+
+    if (!appState.call && calls.length) {
+
+        appState.call =
+            calls[0];
+
+        elements.callSelector.value =
+            getContractValue(
+                appState.call
+            );
 
     }
 
 
-    /*
-     * ---------------------------------------------
-     * PUTS
-     * ---------------------------------------------
-     */
+    if (!appState.put && puts.length) {
 
-    if (Array.isArray(puts)) {
+        appState.put =
+            puts[0];
 
-        populatePutSelector(puts);
+        elements.putSelector.value =
+            getContractValue(
+                appState.put
+            );
 
     }
 
@@ -540,14 +637,52 @@ function processDashboardData(data) {
 
 
     /*
-     * Give chart module the current dashboard.
+     * Dashboard data can also be consumed
+     * by another chart module if present.
      */
 
-    if (typeof window.setDashboardData === "function") {
+    if (
+        typeof window.setDashboardData ===
+        "function"
+    ) {
 
         window.setDashboardData(
             data,
             getCurrentSelection()
+        );
+
+    }
+
+
+    /*
+     * Draw available data.
+     */
+
+    if (appState.future) {
+
+        loadHistoricalChart(
+            "future",
+            appState.future
+        );
+
+    }
+
+
+    if (appState.call) {
+
+        loadHistoricalChart(
+            "call",
+            appState.call
+        );
+
+    }
+
+
+    if (appState.put) {
+
+        loadHistoricalChart(
+            "put",
+            appState.put
         );
 
     }
@@ -566,71 +701,88 @@ function populateExpirySelector(expiries) {
     }
 
 
-    const previous =
-        appState.expiry;
-
-
-    elements.expiry.innerHTML = "";
+    elements.expiry.innerHTML =
+        "";
 
 
     if (!expiries.length) {
 
         const option =
-            document.createElement("option");
+            document.createElement(
+                "option"
+            );
 
-        option.value = "";
-        option.textContent = "No expiry";
+        option.value =
+            "";
 
-        elements.expiry.appendChild(option);
+        option.textContent =
+            "Loading...";
 
-        appState.expiry = "";
+        elements.expiry.appendChild(
+            option
+        );
 
         return;
-
     }
 
 
-    expiries.forEach(expiry => {
+    expiries.forEach(
+        expiry => {
 
-        const value =
-            getExpiryValue(expiry);
+            const option =
+                document.createElement(
+                    "option"
+                );
 
-        const label =
-            getExpiryLabel(expiry);
+
+            const value =
+                getExpiryValue(
+                    expiry
+                );
 
 
-        const option =
-            document.createElement("option");
+            option.value =
+                value;
 
-        option.value = value;
-        option.textContent = label;
+            option.textContent =
+                getExpiryLabel(
+                    expiry
+                );
 
-        elements.expiry.appendChild(option);
 
-    });
+            elements.expiry.appendChild(
+                option
+            );
+
+        }
+    );
 
 
     /*
-     * Keep existing expiry if it still exists.
-     * Otherwise select the first expiry.
+     * Keep current expiry when possible.
      */
 
-    const exists =
-        expiries.some(
-            expiry =>
-                getExpiryValue(expiry) === previous
-        );
+    const currentExists =
+        [...elements.expiry.options]
+            .some(
+                option =>
+                    option.value ===
+                    appState.expiry
+            );
 
 
-    if (exists) {
+    if (
+        appState.expiry &&
+        currentExists
+    ) {
 
-        elements.expiry.value = previous;
-
-        appState.expiry = previous;
+        elements.expiry.value =
+            appState.expiry;
 
     } else {
 
-        elements.expiry.selectedIndex = 0;
+        elements.expiry.selectedIndex =
+            0;
 
         appState.expiry =
             elements.expiry.value;
@@ -641,91 +793,101 @@ function populateExpirySelector(expiries) {
 
 
 /* =========================================================
-   CALL SELECTOR
+   CONTRACT SELECTOR
    ========================================================= */
 
-function populateCallSelector(calls) {
+function populateContractSelector(
+    select,
+    contracts,
+    selected
+) {
 
-    if (!elements.callSelector) {
+    if (!select) {
         return;
     }
 
 
-    const previous =
-        appState.call;
+    select.innerHTML =
+        "";
 
 
-    elements.callSelector.innerHTML = "";
-
-
-    calls.forEach(contract => {
+    if (!contracts.length) {
 
         const option =
-            document.createElement("option");
+            document.createElement(
+                "option"
+            );
 
+        option.value =
+            "";
+
+        option.textContent =
+            "No contracts";
+
+        select.appendChild(
+            option
+        );
+
+        return;
+    }
+
+
+    contracts.forEach(
+        contract => {
+
+            const option =
+                document.createElement(
+                    "option"
+                );
+
+
+            const value =
+                getContractValue(
+                    contract
+                );
+
+
+            option.value =
+                value;
+
+
+            option.textContent =
+                getOptionLabel(
+                    contract
+                );
+
+
+            select.appendChild(
+                option
+            );
+
+        }
+    );
+
+
+    if (selected) {
 
         const value =
-            getContractValue(contract);
-
-        const label =
-            getOptionLabel(contract);
-
-
-        option.value = value;
-        option.textContent = label;
+            getContractValue(
+                selected
+            );
 
 
-        elements.callSelector.appendChild(
-            option
-        );
-
-    });
-
-
-    if (!calls.length) {
-
-        const option =
-            document.createElement("option");
-
-        option.value = "";
-        option.textContent = "No Call";
-
-        elements.callSelector.appendChild(
-            option
-        );
-
-        appState.call = "";
-
-        return;
-
-    }
+        const exists =
+            [...select.options]
+                .some(
+                    option =>
+                        option.value ===
+                        value
+                );
 
 
-    const exists =
-        calls.some(
-            contract =>
-                getContractValue(contract) === previous
-        );
+        if (exists) {
 
+            select.value =
+                value;
 
-    if (exists) {
-
-        elements.callSelector.value =
-            previous;
-
-        appState.call =
-            previous;
-
-    } else {
-
-        /*
-         * Automatically select the first OTM Call.
-         */
-
-        elements.callSelector.selectedIndex = 0;
-
-        appState.call =
-            elements.callSelector.value;
+        }
 
     }
 
@@ -733,93 +895,309 @@ function populateCallSelector(calls) {
 
 
 /* =========================================================
-   PUT SELECTOR
+   CONTRACT VALUE
    ========================================================= */
 
-function populatePutSelector(puts) {
+function getContractValue(contract) {
 
-    if (!elements.putSelector) {
-        return;
+    if (!contract) {
+        return "";
     }
 
 
-    const previous =
-        appState.put;
+    return String(
+        contract.scrip_code ??
+        contract.broker_token ??
+        contract.token ??
+        contract.instrument_token ??
+        contract.symbol ??
+        ""
+    );
+
+}
 
 
-    elements.putSelector.innerHTML = "";
+/* =========================================================
+   CONTRACT LABEL
+   ========================================================= */
+
+function getOptionLabel(contract) {
+
+    if (!contract) {
+        return "-";
+    }
 
 
-    puts.forEach(contract => {
+    if (contract.symbol) {
 
-        const option =
-            document.createElement("option");
-
-
-        const value =
-            getContractValue(contract);
-
-        const label =
-            getOptionLabel(contract);
-
-
-        option.value = value;
-        option.textContent = label;
-
-
-        elements.putSelector.appendChild(
-            option
+        return String(
+            contract.symbol
         );
-
-    });
-
-
-    if (!puts.length) {
-
-        const option =
-            document.createElement("option");
-
-        option.value = "";
-        option.textContent = "No Put";
-
-        elements.putSelector.appendChild(
-            option
-        );
-
-        appState.put = "";
-
-        return;
 
     }
 
 
-    const exists =
-        puts.some(
-            contract =>
-                getContractValue(contract) === previous
+    const optionType =
+        contract.option_type ||
+        contract.optionType ||
+        "";
+
+
+    const strike =
+        contract.strike ??
+        "";
+
+
+    if (
+        optionType &&
+        strike !== ""
+    ) {
+
+        return `${strike} ${optionType}`;
+
+    }
+
+
+    return getContractValue(
+        contract
+    );
+
+}
+
+
+/* =========================================================
+   SELECTED CONTRACT
+   ========================================================= */
+
+function getSelectedContract(select) {
+
+    if (!select) {
+        return null;
+    }
+
+
+    const selectedIndex =
+        select.selectedIndex;
+
+
+    if (selectedIndex < 0) {
+        return null;
+    }
+
+
+    const option =
+        select.options[
+            selectedIndex
+        ];
+
+
+    if (!option) {
+        return null;
+    }
+
+
+    return {
+        symbol:
+            option.textContent,
+
+        scrip_code:
+            option.value
+    };
+
+}
+
+
+/* =========================================================
+   EXPIRY VALUE
+   ========================================================= */
+
+function getExpiryValue(expiry) {
+
+    if (
+        typeof expiry ===
+        "string"
+    ) {
+
+        return expiry;
+
+    }
+
+
+    if (!expiry) {
+        return "";
+    }
+
+
+    return String(
+        expiry.value ??
+        expiry.expiry ??
+        expiry.date ??
+        expiry.name ??
+        ""
+    );
+
+}
+
+
+/* =========================================================
+   EXPIRY LABEL
+   ========================================================= */
+
+function getExpiryLabel(expiry) {
+
+    if (
+        typeof expiry ===
+        "string"
+    ) {
+
+        return expiry;
+
+    }
+
+
+    if (!expiry) {
+        return "-";
+    }
+
+
+    return String(
+        expiry.label ??
+        expiry.expiry ??
+        expiry.date ??
+        expiry.name ??
+        expiry.value ??
+        ""
+    );
+
+}
+
+
+/* =========================================================
+   CONTRACT LABELS
+   ========================================================= */
+
+function updateContractLabels() {
+
+    const futureName =
+        getContractName(
+            appState.future
         );
 
 
-    if (exists) {
+    const callName =
+        getContractName(
+            appState.call
+        );
 
-        elements.putSelector.value =
-            previous;
 
-        appState.put =
-            previous;
+    const putName =
+        getContractName(
+            appState.put
+        );
 
-    } else {
 
-        /*
-         * Automatically select the first OTM Put.
-         */
+    if (elements.futureSymbol) {
 
-        elements.putSelector.selectedIndex = 0;
-
-        appState.put =
-            elements.putSelector.value;
+        elements.futureSymbol.textContent =
+            futureName;
 
     }
+
+
+    if (elements.callSymbol) {
+
+        elements.callSymbol.textContent =
+            callName;
+
+    }
+
+
+    if (elements.putSymbol) {
+
+        elements.putSymbol.textContent =
+            putName;
+
+    }
+
+
+    if (elements.futureContract) {
+
+        elements.futureContract.textContent =
+            futureName;
+
+    }
+
+
+    if (elements.callContract) {
+
+        elements.callContract.textContent =
+            callName;
+
+    }
+
+
+    if (elements.putContract) {
+
+        elements.putContract.textContent =
+            putName;
+
+    }
+
+}
+
+
+/* =========================================================
+   CONTRACT NAME
+   ========================================================= */
+
+function getContractName(contract) {
+
+    if (!contract) {
+        return "-";
+    }
+
+
+    return String(
+        contract.symbol ??
+        contract.name ??
+        contract.trading_symbol ??
+        "-"
+    );
+
+}
+
+
+/* =========================================================
+   CLEAR DASHBOARD
+   ========================================================= */
+
+function clearDashboard() {
+
+    appState.future =
+        null;
+
+    appState.call =
+        null;
+
+    appState.put =
+        null;
+
+
+    updateContractLabels();
+
+    resetContractSelectors();
+
+    clearCanvas(
+        elements.futureCanvas
+    );
+
+    clearCanvas(
+        elements.callCanvas
+    );
+
+    clearCanvas(
+        elements.putCanvas
+    );
 
 }
 
@@ -849,31 +1227,46 @@ function resetContractSelectors() {
 
 
 /* =========================================================
-   CONTRACT LABELS
+   LOADING MESSAGE
    ========================================================= */
 
-function updateContractLabels() {
+function showChartLoading(
+    chart,
+    message
+) {
 
-    if (elements.futureContract) {
+    let target = null;
 
-        elements.futureContract.textContent =
-            appState.future || "-";
+
+    if (chart === "future") {
+
+        target =
+            elements.futureLoading;
+
+    }
+
+    if (chart === "call") {
+
+        target =
+            elements.callLoading;
+
+    }
+
+    if (chart === "put") {
+
+        target =
+            elements.putLoading;
 
     }
 
 
-    if (elements.callContract) {
+    if (target) {
 
-        elements.callContract.textContent =
-            appState.call || "-";
+        target.textContent =
+            message;
 
-    }
-
-
-    if (elements.putContract) {
-
-        elements.putContract.textContent =
-            appState.put || "-";
+        target.style.display =
+            "block";
 
     }
 
@@ -881,45 +1274,40 @@ function updateContractLabels() {
 
 
 /* =========================================================
-   FUTURE INFORMATION
+   HIDE LOADING
    ========================================================= */
 
-function updateFutureInformation(future) {
+function hideChartLoading(chart) {
 
-    if (!future) {
-        return;
+    let target = null;
+
+
+    if (chart === "future") {
+
+        target =
+            elements.futureLoading;
+
     }
 
+    if (chart === "call") {
 
-    const name =
-        future.symbol ||
-        future.name ||
-        future.contract ||
-        future.trading_symbol ||
-        future.scrip_name ||
-        "-";
+        target =
+            elements.callLoading;
 
+    }
 
-    const ltp =
-        future.ltp ??
-        future.last_price ??
-        future.lastPrice ??
-        future.close ??
-        "-";
+    if (chart === "put") {
 
-
-    if (elements.futureSymbol) {
-
-        elements.futureSymbol.textContent =
-            name;
+        target =
+            elements.putLoading;
 
     }
 
 
-    if (elements.futureLtp) {
+    if (target) {
 
-        elements.futureLtp.textContent =
-            formatPrice(ltp);
+        target.style.display =
+            "none";
 
     }
 
@@ -927,79 +1315,1164 @@ function updateFutureInformation(future) {
 
 
 /* =========================================================
-   LIVE TICK UPDATE
+   HISTORICAL DATA
    ========================================================= */
 
-function updateMarketTick(tick) {
+async function loadHistoricalChart(
+    chartType,
+    contract
+) {
 
-    if (!tick) {
+    if (!contract) {
         return;
     }
 
 
-    const instrument =
-        String(
-            tick.instrument ||
-            tick.type ||
-            ""
-        ).toLowerCase();
+    showChartLoading(
+        chartType,
+        "Loading chart..."
+    );
 
 
-    const ltp =
-        tick.ltp ??
-        tick.last_price ??
-        tick.lastPrice ??
-        tick.price;
+    try {
+
+        const params =
+            new URLSearchParams();
 
 
-    if (ltp === undefined) {
+        params.set(
+            "symbol",
+            appState.symbol
+        );
+
+
+        if (appState.expiry) {
+
+            params.set(
+                "expiry",
+                appState.expiry
+            );
+
+        }
+
+
+        params.set(
+            "timeframe",
+            getApiTimeframe(
+                appState.timeframe
+            )
+        );
+
+
+        params.set(
+            "refresh",
+            "false"
+        );
+
+
+        /*
+         * Instrument type
+         */
+
+        let instrumentType =
+            "FUTURE";
+
+
+        if (chartType === "call") {
+
+            instrumentType =
+                "CALL";
+
+        }
+
+
+        if (chartType === "put") {
+
+            instrumentType =
+                "PUT";
+
+        }
+
+
+        params.set(
+            "instrument_type",
+            instrumentType
+        );
+
+
+        /*
+         * Contract fields
+         */
+
+        if (
+            contract.scrip_code !==
+            undefined
+        ) {
+
+            params.set(
+                "scrip_code",
+                contract.scrip_code
+            );
+
+        }
+
+
+        if (contract.broker_token) {
+
+            params.set(
+                "broker_token",
+                contract.broker_token
+            );
+
+        }
+
+
+        if (contract.strike !== undefined) {
+
+            params.set(
+                "strike",
+                contract.strike
+            );
+
+        }
+
+
+        if (contract.option_type) {
+
+            params.set(
+                "option_type",
+                contract.option_type
+            );
+
+        }
+
+
+        const response =
+            await fetch(
+                `/api/historical?${params.toString()}`
+            );
+
+
+        if (!response.ok) {
+
+            throw new Error(
+                `Historical request failed: ${response.status}`
+            );
+
+        }
+
+
+        const result =
+            await response.json();
+
+
+        const candles =
+            normalizeCandles(
+                result
+            );
+
+
+        drawChart(
+            chartType,
+            candles
+        );
+
+
+        hideChartLoading(
+            chartType
+        );
+
+
+    } catch (error) {
+
+        console.error(
+            `${chartType} chart error:`,
+            error
+        );
+
+
+        showChartLoading(
+            chartType,
+            "Waiting for market data..."
+        );
+
+    }
+
+}
+
+
+/* =========================================================
+   API TIMEFRAME
+   ========================================================= */
+
+function getApiTimeframe(
+    timeframe
+) {
+
+    switch (timeframe) {
+
+        case "3m":
+            return "1m";
+
+        case "4h":
+            return "60m";
+
+        case "1h":
+            return "60m";
+
+        default:
+            return timeframe;
+
+    }
+
+}
+
+
+/* =========================================================
+   REFRESH ALL CHARTS
+   ========================================================= */
+
+async function refreshAllCharts() {
+
+    const jobs = [];
+
+
+    if (appState.future) {
+
+        jobs.push(
+            loadHistoricalChart(
+                "future",
+                appState.future
+            )
+        );
+
+    }
+
+
+    if (appState.call) {
+
+        jobs.push(
+            loadHistoricalChart(
+                "call",
+                appState.call
+            )
+        );
+
+    }
+
+
+    if (appState.put) {
+
+        jobs.push(
+            loadHistoricalChart(
+                "put",
+                appState.put
+            )
+        );
+
+    }
+
+
+    await Promise.all(
+        jobs
+    );
+
+}
+
+
+/* =========================================================
+   REFRESH CALL
+   ========================================================= */
+
+async function refreshCallChart() {
+
+    if (!appState.call) {
         return;
     }
+
+
+    await loadHistoricalChart(
+        "call",
+        appState.call
+    );
+
+}
+
+
+/* =========================================================
+   REFRESH PUT
+   ========================================================= */
+
+async function refreshPutChart() {
+
+    if (!appState.put) {
+        return;
+    }
+
+
+    await loadHistoricalChart(
+        "put",
+        appState.put
+    );
+
+}
+
+
+/* =========================================================
+   NORMALIZE CANDLES
+   ========================================================= */
+
+function normalizeCandles(result) {
+
+    let data = [];
+
+
+    if (Array.isArray(result)) {
+
+        data =
+            result;
+
+    } else if (
+        Array.isArray(result.candles)
+    ) {
+
+        data =
+            result.candles;
+
+    } else if (
+        Array.isArray(result.data)
+    ) {
+
+        data =
+            result.data;
+
+    } else if (
+        Array.isArray(result.records)
+    ) {
+
+        data =
+            result.records;
+
+    }
+
+
+    return data
+        .map(
+            candle =>
+                normalizeCandle(
+                    candle
+                )
+        )
+        .filter(
+            candle =>
+                candle !== null
+        )
+        .slice(-150);
+
+}
+
+
+/* =========================================================
+   NORMALIZE SINGLE CANDLE
+   ========================================================= */
+
+function normalizeCandle(candle) {
+
+    if (!candle) {
+        return null;
+    }
+
+
+    const time =
+        candle.time ??
+        candle.datetime ??
+        candle.date ??
+        candle.Timestamp ??
+        candle.timestamp;
+
+
+    const open =
+        Number(
+            candle.open ??
+            candle.Open ??
+            candle.o
+        );
+
+
+    const high =
+        Number(
+            candle.high ??
+            candle.High ??
+            candle.h
+        );
+
+
+    const low =
+        Number(
+            candle.low ??
+            candle.Low ??
+            candle.l
+        );
+
+
+    const close =
+        Number(
+            candle.close ??
+            candle.Close ??
+            candle.c
+        );
 
 
     if (
-        instrument === "future" ||
-        instrument === "futures"
+        !Number.isFinite(open) ||
+        !Number.isFinite(high) ||
+        !Number.isFinite(low) ||
+        !Number.isFinite(close)
     ) {
 
-        if (elements.futureLtp) {
-
-            elements.futureLtp.textContent =
-                formatPrice(ltp);
-
-        }
+        return null;
 
     }
 
 
-    else if (
-        instrument === "call" ||
-        instrument === "ce"
-    ) {
+    return {
 
-        if (elements.callLtp) {
+        time,
 
-            elements.callLtp.textContent =
-                formatPrice(ltp);
+        open,
 
-        }
+        high,
+
+        low,
+
+        close
+
+    };
+
+}
+
+
+/* =========================================================
+   DRAW CHART
+   ========================================================= */
+
+function drawChart(
+    chartType,
+    candles
+) {
+
+    let canvas = null;
+
+
+    if (chartType === "future") {
+
+        canvas =
+            elements.futureCanvas;
 
     }
 
 
-    else if (
-        instrument === "put" ||
-        instrument === "pe"
-    ) {
+    if (chartType === "call") {
 
-        if (elements.putLtp) {
-
-            elements.putLtp.textContent =
-                formatPrice(ltp);
-
-        }
+        canvas =
+            elements.callCanvas;
 
     }
+
+
+    if (chartType === "put") {
+
+        canvas =
+            elements.putCanvas;
+
+    }
+
+
+    if (!canvas) {
+        return;
+    }
+
+
+    if (!candles.length) {
+
+        clearCanvas(
+            canvas
+        );
+
+        return;
+    }
+
+
+    const context =
+        canvas.getContext(
+            "2d"
+        );
+
+
+    const rect =
+        canvas.getBoundingClientRect();
+
+
+    const width =
+        Math.max(
+            1,
+            Math.floor(
+                rect.width
+            )
+        );
+
+
+    const height =
+        Math.max(
+            1,
+            Math.floor(
+                rect.height
+            )
+        );
+
+
+    const ratio =
+        window.devicePixelRatio ||
+        1;
+
+
+    canvas.width =
+        width * ratio;
+
+
+    canvas.height =
+        height * ratio;
+
+
+    context.setTransform(
+        ratio,
+        0,
+        0,
+        ratio,
+        0,
+        0
+    );
+
+
+    context.clearRect(
+        0,
+        0,
+        width,
+        height
+    );
+
+
+    /*
+     * SHA calculation
+     */
+
+    const sha =
+        calculateSHA(
+            candles,
+            3
+        );
+
+
+    const values =
+        [];
+
+
+    candles.forEach(
+        candle => {
+
+            values.push(
+                candle.high,
+                candle.low
+            );
+
+        }
+    );
+
+
+    sha.forEach(
+        candle => {
+
+            values.push(
+                candle.high,
+                candle.low
+            );
+
+        }
+    );
+
+
+    let min =
+        Math.min(
+            ...values
+        );
+
+
+    let max =
+        Math.max(
+            ...values
+        );
+
+
+    if (
+        !Number.isFinite(min) ||
+        !Number.isFinite(max)
+    ) {
+
+        return;
+
+    }
+
+
+    const paddingTop =
+        20;
+
+    const paddingBottom =
+        20;
+
+    const paddingLeft =
+        10;
+
+    const paddingRight =
+        55;
+
+
+    const chartWidth =
+        width -
+        paddingLeft -
+        paddingRight;
+
+
+    const chartHeight =
+        height -
+        paddingTop -
+        paddingBottom;
+
+
+    if (
+        chartWidth <= 0 ||
+        chartHeight <= 0
+    ) {
+
+        return;
+
+    }
+
+
+    const range =
+        max - min ||
+        1;
+
+
+    function y(value) {
+
+        return (
+            paddingTop +
+            (
+                (max - value) /
+                range
+            ) *
+            chartHeight
+        );
+
+    }
+
+
+    /*
+     * Grid
+     */
+
+    context.strokeStyle =
+        "#1c232c";
+
+    context.lineWidth =
+        1;
+
+
+    for (
+        let i = 0;
+        i <= 5;
+        i++
+    ) {
+
+        const gy =
+            paddingTop +
+            (
+                chartHeight *
+                i /
+                5
+            );
+
+
+        context.beginPath();
+
+        context.moveTo(
+            paddingLeft,
+            gy
+        );
+
+        context.lineTo(
+            width -
+            paddingRight,
+            gy
+        );
+
+        context.stroke();
+
+    }
+
+
+    /*
+     * Price labels
+     */
+
+    context.fillStyle =
+        "#667281";
+
+    context.font =
+        "10px Arial";
+
+
+    for (
+        let i = 0;
+        i <= 5;
+        i++
+    ) {
+
+        const value =
+            max -
+            (
+                range *
+                i /
+                5
+            );
+
+
+        const gy =
+            paddingTop +
+            (
+                chartHeight *
+                i /
+                5
+            );
+
+
+        context.fillText(
+            formatPrice(value),
+            width -
+            paddingRight +
+            6,
+            gy + 3
+        );
+
+    }
+
+
+    /*
+     * Candles
+     */
+
+    const count =
+        candles.length;
+
+
+    const candleSpace =
+        chartWidth /
+        count;
+
+
+    const candleWidth =
+        Math.max(
+            2,
+            Math.min(
+                8,
+                candleSpace * 0.65
+            )
+        );
+
+
+    candles.forEach(
+        (
+            candle,
+            index
+        ) => {
+
+            const x =
+                paddingLeft +
+                (
+                    index *
+                    candleSpace
+                ) +
+                (
+                    candleSpace /
+                    2
+                );
+
+
+            const openY =
+                y(
+                    candle.open
+                );
+
+
+            const closeY =
+                y(
+                    candle.close
+                );
+
+
+            const highY =
+                y(
+                    candle.high
+                );
+
+
+            const lowY =
+                y(
+                    candle.low
+                );
+
+
+            const rising =
+                candle.close >=
+                candle.open;
+
+
+            context.strokeStyle =
+                rising
+                    ? "#31c48d"
+                    : "#ef5350";
+
+
+            context.fillStyle =
+                rising
+                    ? "#31c48d"
+                    : "#ef5350";
+
+
+            context.lineWidth =
+                1;
+
+
+            /*
+             * Wick
+             */
+
+            context.beginPath();
+
+            context.moveTo(
+                x,
+                highY
+            );
+
+            context.lineTo(
+                x,
+                lowY
+            );
+
+            context.stroke();
+
+
+            /*
+             * Body
+             */
+
+            const bodyTop =
+                Math.min(
+                    openY,
+                    closeY
+                );
+
+
+            const bodyHeight =
+                Math.max(
+                    1,
+                    Math.abs(
+                        closeY -
+                        openY
+                    )
+                );
+
+
+            context.fillRect(
+                x -
+                candleWidth / 2,
+                bodyTop,
+                candleWidth,
+                bodyHeight
+            );
+
+        }
+    );
+
+
+    /*
+     * SHA line
+     */
+
+    if (sha.length) {
+
+        context.strokeStyle =
+            "#f0b90b";
+
+        context.lineWidth =
+            1.5;
+
+        context.beginPath();
+
+
+        sha.forEach(
+            (
+                candle,
+                index
+            ) => {
+
+                const x =
+                    paddingLeft +
+                    (
+                        index *
+                        candleSpace
+                    ) +
+                    (
+                        candleSpace /
+                        2
+                    );
+
+
+                const value =
+                    candle.close;
+
+
+                const py =
+                    y(value);
+
+
+                if (index === 0) {
+
+                    context.moveTo(
+                        x,
+                        py
+                    );
+
+                } else {
+
+                    context.lineTo(
+                        x,
+                        py
+                    );
+
+                }
+
+            }
+        );
+
+
+        context.stroke();
+
+    }
+
+}
+
+
+/* =========================================================
+   SHA / SMOOTHED HEIKIN ASHI
+   ========================================================= */
+
+function calculateSHA(
+    candles,
+    period = 3
+) {
+
+    if (!candles.length) {
+        return [];
+    }
+
+
+    const ha = [];
+
+
+    candles.forEach(
+        (
+            candle,
+            index
+        ) => {
+
+            const close =
+                (
+                    candle.open +
+                    candle.high +
+                    candle.low +
+                    candle.close
+                ) / 4;
+
+
+            let open;
+
+
+            if (index === 0) {
+
+                open =
+                    (
+                        candle.open +
+                        candle.close
+                    ) / 2;
+
+            } else {
+
+                open =
+                    (
+                        ha[index - 1].open +
+                        ha[index - 1].close
+                    ) / 2;
+
+            }
+
+
+            const high =
+                Math.max(
+                    candle.high,
+                    open,
+                    close
+                );
+
+
+            const low =
+                Math.min(
+                    candle.low,
+                    open,
+                    close
+                );
+
+
+            ha.push({
+
+                open,
+                high,
+                low,
+                close
+
+            });
+
+        }
+    );
+
+
+    /*
+     * EMA smoothing
+     */
+
+    const alpha =
+        2 /
+        (
+            period +
+            1
+        );
+
+
+    const result =
+        [];
+
+
+    let previous =
+        ha[0].close;
+
+
+    ha.forEach(
+        (
+            candle,
+            index
+        ) => {
+
+            const smoothed =
+                index === 0
+                    ? candle.close
+                    : (
+                        (
+                            candle.close -
+                            previous
+                        ) *
+                        alpha
+                    ) +
+                    previous;
+
+
+            previous =
+                smoothed;
+
+
+            result.push({
+
+                open:
+                    smoothed,
+
+                high:
+                    smoothed,
+
+                low:
+                    smoothed,
+
+                close:
+                    smoothed
+
+            });
+
+        }
+    );
+
+
+    return result;
+
+}
+
+
+/* =========================================================
+   PRICE FORMAT
+   ========================================================= */
+
+function formatPrice(value) {
+
+    if (
+        !Number.isFinite(value)
+    ) {
+
+        return "--";
+
+    }
+
+
+    return value.toLocaleString(
+        "en-IN",
+        {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        }
+    );
+
+}
+
+
+/* =========================================================
+   CLEAR CANVAS
+   ========================================================= */
+
+function clearCanvas(canvas) {
+
+    if (!canvas) {
+        return;
+    }
+
+
+    const context =
+        canvas.getContext(
+            "2d"
+        );
+
+
+    context.clearRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
 
 }
 
@@ -1008,13 +2481,20 @@ function updateMarketTick(tick) {
    CONNECTION STATUS
    ========================================================= */
 
-function setConnectionStatus(connected) {
+function setConnectionStatus(
+    connected
+) {
 
     appState.connected =
-        Boolean(connected);
+        Boolean(
+            connected
+        );
 
 
-    if (!elements.connectionStatus) {
+    if (
+        !elements.connectionStatus
+    ) {
+
         return;
     }
 
@@ -1024,255 +2504,16 @@ function setConnectionStatus(connected) {
         elements.connectionStatus.textContent =
             "● Connected";
 
-        elements.connectionStatus.classList.remove(
-            "disconnected"
-        );
-
-        elements.connectionStatus.classList.add(
-            "connected"
-        );
+        elements.connectionStatus.className =
+            "status connected";
 
     } else {
 
         elements.connectionStatus.textContent =
             "● Disconnected";
 
-        elements.connectionStatus.classList.remove(
-            "connected"
-        );
-
-        elements.connectionStatus.classList.add(
-            "disconnected"
-        );
-
-    }
-
-}
-
-
-/* =========================================================
-   LOADING
-   ========================================================= */
-
-function showChartLoading(type, message) {
-
-    let container = null;
-
-
-    if (type === "future") {
-        container = elements.futureChart;
-    }
-
-    if (type === "call") {
-        container = elements.callChart;
-    }
-
-    if (type === "put") {
-        container = elements.putChart;
-    }
-
-
-    if (!container) {
-        return;
-    }
-
-
-    /*
-     * Do not destroy an existing chart.
-     * Just update/create a loading indicator.
-     */
-
-    let loader =
-        container.querySelector(".chart-loading");
-
-
-    if (!loader) {
-
-        loader =
-            document.createElement("div");
-
-        loader.className =
-            "chart-loading";
-
-        container.appendChild(loader);
-
-    }
-
-
-    loader.textContent =
-        message || "Loading...";
-
-    loader.style.display =
-        "block";
-
-}
-
-
-/* =========================================================
-   HIDE LOADING
-   ========================================================= */
-
-function hideChartLoading(type) {
-
-    let container = null;
-
-
-    if (type === "future") {
-        container = elements.futureChart;
-    }
-
-    if (type === "call") {
-        container = elements.callChart;
-    }
-
-    if (type === "put") {
-        container = elements.putChart;
-    }
-
-
-    if (!container) {
-        return;
-    }
-
-
-    const loader =
-        container.querySelector(".chart-loading");
-
-
-    if (loader) {
-
-        loader.style.display =
-            "none";
-
-    }
-
-}
-
-
-/* =========================================================
-   CLEAR CONTRACT INFORMATION
-   ========================================================= */
-
-function clearContractInformation() {
-
-    appState.future = "";
-
-    if (elements.futureSymbol) {
-        elements.futureSymbol.textContent = "-";
-    }
-
-    if (elements.futureLtp) {
-        elements.futureLtp.textContent = "-";
-    }
-
-    if (elements.callLtp) {
-        elements.callLtp.textContent = "-";
-    }
-
-    if (elements.putLtp) {
-        elements.putLtp.textContent = "-";
-    }
-
-    if (elements.futureContract) {
-        elements.futureContract.textContent = "-";
-    }
-
-    if (elements.callContract) {
-        elements.callContract.textContent = "-";
-    }
-
-    if (elements.putContract) {
-        elements.putContract.textContent = "-";
-    }
-
-}
-
-
-/* =========================================================
-   DASHBOARD ERROR
-   ========================================================= */
-
-function handleDashboardError(error) {
-
-    console.error(error);
-
-
-    if (elements.futureChart) {
-
-        showChartLoading(
-            "future",
-            "Unable to load Future data"
-        );
-
-    }
-
-
-    if (elements.callChart) {
-
-        showChartLoading(
-            "call",
-            "Unable to load Call data"
-        );
-
-    }
-
-
-    if (elements.putChart) {
-
-        showChartLoading(
-            "put",
-            "Unable to load Put data"
-        );
-
-    }
-
-}
-
-
-/* =========================================================
-   WEBSOCKET SELECTION
-   ========================================================= */
-
-function sendSelection() {
-
-    const selection = getCurrentSelection();
-
-
-    /*
-     * websocket.js is responsible for the actual
-     * WebSocket connection.
-     */
-
-    if (
-        typeof window.sendWebSocketMessage ===
-        "function"
-    ) {
-
-        window.sendWebSocketMessage({
-
-            type: "selection",
-
-            data: selection
-
-        });
-
-        return;
-
-    }
-
-
-    /*
-     * Alternative function name for websocket.js.
-     */
-
-    if (
-        typeof window.sendSelectionMessage ===
-        "function"
-    ) {
-
-        window.sendSelectionMessage(
-            selection
-        );
+        elements.connectionStatus.className =
+            "status disconnected";
 
     }
 
@@ -1287,17 +2528,23 @@ function getCurrentSelection() {
 
     return {
 
-        symbol: appState.symbol,
+        symbol:
+            appState.symbol,
 
-        expiry: appState.expiry,
+        expiry:
+            appState.expiry,
 
-        timeframe: appState.timeframe,
+        timeframe:
+            appState.timeframe,
 
-        future: appState.future,
+        future:
+            appState.future,
 
-        call: appState.call,
+        call:
+            appState.call,
 
-        put: appState.put
+        put:
+            appState.put
 
     };
 
@@ -1305,249 +2552,164 @@ function getCurrentSelection() {
 
 
 /* =========================================================
-   CONTRACT HELPERS
+   WEBSOCKET SELECTION
    ========================================================= */
 
-function getContractValue(contract) {
+function sendSelection() {
 
-    if (contract === null ||
-        contract === undefined) {
-
-        return "";
-
-    }
-
-
-    if (typeof contract === "string" ||
-        typeof contract === "number") {
-
-        return String(contract);
-
-    }
-
-
-    return String(
-        contract.symbol ||
-        contract.trading_symbol ||
-        contract.tradingSymbol ||
-        contract.contract ||
-        contract.broker_token ||
-        contract.token ||
-        contract.scrip_code ||
-        ""
-    );
-
-}
-
-
-function getOptionLabel(contract) {
-
-    if (
-        contract === null ||
-        contract === undefined
-    ) {
-
-        return "";
-
-    }
+    const selection =
+        getCurrentSelection();
 
 
     if (
-        typeof contract === "string" ||
-        typeof contract === "number"
+        window.tradingWebSocket &&
+        typeof
+        window.tradingWebSocket.setSelection ===
+        "function"
     ) {
 
-        return String(contract);
+        window.tradingWebSocket.setSelection(
+            selection
+        );
 
     }
-
-
-    const symbol =
-        contract.symbol ||
-        contract.trading_symbol ||
-        contract.tradingSymbol ||
-        "";
-
-
-    const strike =
-        contract.strike ??
-        contract.strike_price ??
-        contract.strikePrice;
-
-
-    const optionType =
-        contract.option_type ||
-        contract.optionType ||
-        contract.type ||
-        "";
-
-
-    if (strike !== undefined &&
-        strike !== null &&
-        optionType) {
-
-        return `${strike} ${optionType}`;
-
-    }
-
-
-    if (symbol) {
-        return symbol;
-    }
-
-
-    return getContractValue(contract);
-
-}
-
-
-function getExpiryValue(expiry) {
-
-    if (
-        expiry === null ||
-        expiry === undefined
-    ) {
-
-        return "";
-
-    }
-
-
-    if (
-        typeof expiry === "string" ||
-        typeof expiry === "number"
-    ) {
-
-        return String(expiry);
-
-    }
-
-
-    return String(
-        expiry.expiry ||
-        expiry.date ||
-        expiry.expiry_date ||
-        expiry.expiryDate ||
-        expiry.value ||
-        ""
-    );
-
-}
-
-
-function getExpiryLabel(expiry) {
-
-    if (
-        expiry === null ||
-        expiry === undefined
-    ) {
-
-        return "";
-
-    }
-
-
-    if (
-        typeof expiry === "string" ||
-        typeof expiry === "number"
-    ) {
-
-        return String(expiry);
-
-    }
-
-
-    return String(
-        expiry.label ||
-        expiry.expiry ||
-        expiry.date ||
-        expiry.expiry_date ||
-        expiry.expiryDate ||
-        expiry.value ||
-        ""
-    );
 
 }
 
 
 /* =========================================================
-   PRICE FORMATTER
+   LIVE MARKET TICK
    ========================================================= */
 
-function formatPrice(value) {
+window.updateMarketTick =
+    function (data) {
 
-    if (
-        value === null ||
-        value === undefined ||
-        value === ""
-    ) {
-
-        return "-";
-
-    }
-
-
-    const number =
-        Number(value);
-
-
-    if (!Number.isFinite(number)) {
-
-        return String(value);
-
-    }
-
-
-    return number.toLocaleString(
-        "en-IN",
-        {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
+        if (!data) {
+            return;
         }
-    );
+
+
+        if (
+            data.future &&
+            data.future.ltp !==
+            undefined
+        ) {
+
+            updateMarketValue(
+                elements.futureLtp,
+                data.future.ltp
+            );
+
+        }
+
+
+        if (
+            data.call &&
+            data.call.ltp !==
+            undefined
+        ) {
+
+            updateMarketValue(
+                elements.callLtp,
+                data.call.ltp
+            );
+
+        }
+
+
+        if (
+            data.put &&
+            data.put.ltp !==
+            undefined
+        ) {
+
+            updateMarketValue(
+                elements.putLtp,
+                data.put.ltp
+            );
+
+        }
+
+    };
+
+
+/* =========================================================
+   MARKET VALUE UPDATE
+   ========================================================= */
+
+function updateMarketValue(
+    element,
+    value
+) {
+
+    if (!element) {
+        return;
+    }
+
+
+    element.textContent =
+        formatPrice(
+            Number(value)
+        );
 
 }
 
 
 /* =========================================================
-   PUBLIC API
+   GLOBAL API FOR OTHER MODULES
    ========================================================= */
+
+window.getCurrentSelection =
+    getCurrentSelection;
+
+
+window.refreshCharts =
+    async function (options = {}) {
+
+        if (options.timeframe) {
+
+            appState.timeframe =
+                options.timeframe;
+
+        }
+
+
+        await refreshAllCharts();
+
+    };
+
+
+window.refreshCallChart =
+    refreshCallChart;
+
+
+window.refreshPutChart =
+    refreshPutChart;
+
 
 window.tradingDashboard = {
 
-    state: appState,
+    state:
+        appState,
 
     getSelection:
         getCurrentSelection,
 
-    loadDashboard:
-        loadDashboard,
-
-    updateMarketTick:
-        updateMarketTick,
-
-    setConnectionStatus:
-        setConnectionStatus,
-
-    hideChartLoading:
-        hideChartLoading,
-
-    showChartLoading:
-        showChartLoading
+    refresh:
+        refreshAllCharts
 
 };
 
 
 /* =========================================================
-   GLOBAL COMPATIBILITY FUNCTIONS
+   RESIZE
    ========================================================= */
 
-window.updateMarketTick =
-    updateMarketTick;
+window.addEventListener(
+    "resize",
+    function () {
 
-window.setConnectionStatus =
-    setConnectionStatus;
+        refreshAllCharts();
 
-window.getCurrentSelection =
-    getCurrentSelection;
-```
+    }
+);
