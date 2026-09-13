@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>5paisa Trading Dashboard</title>
+
+    <link
+        rel="stylesheet"
+        href="/css/style.css"
+    >
+</head>
+
+<body>
+
+<div class="app">
+
+    <header class="topbar">
+
+        <div class="title">
+            5paisa Trading Dashboard
+        </div>
+
+        <div
+            id="connectionStatus"
+            class="connection disconnected"
+        >
+            ● Disconnected
+        </div>
+
+    </header>
+
+
+    <section class="controls">
+
+        <div class="control">
+
+            <label for="symbolSelect">
+                Symbol
+            </label>
+
+            <select id="symbolSelect">
+
+                <option value="NIFTY">
+                    NIFTY
+                </option>
+
+                <option value="BANKNIFTY">
+                    BANKNIFTY
+                </option>
+
+                <option value="SENSEX">
+                    SENSEX
+                </option>
+
+                <option value="CRUDEOIL">
+                    CRUDEOIL
+                </option>
+
+                <option value="NATURALGAS">
+                    NATURALGAS
+                </option>
+
+            </select>
+
+        </div>
+
+
+        <div class="control">
+
+            <label for="expirySelect">
+                Expiry
+            </label>
+
+            <select id="expirySelect">
+
+                <option>
+                    Loading...
+                </option>
+
+            </select>
+
+        </div>
+
+
+        <div class="control">
+
+            <label for="timeframeSelect">
+                Timeframe
+            </label>
+
+            <select id="timeframeSelect">
+
+                <option value="1m">
+                    1m
+                </option>
+
+                <option value="3m">
+                    3m
+                </option>
+
+                <option
+                    value="5m"
+                    selected
+                >
+                    5m
+                </option>
+
+                <option value="15m">
+                    15m
+                </option>
+
+                <option value="30m">
+                    30m
+                </option>
+
+                <option value="1h">
+                    1h
+                </option>
+
+                <option value="4h">
+                    4h
+                </option>
+
+                <option value="1d">
+                    1d
+                </option>
+
+            </select>
+
+        </div>
+
+    </section>
+
+
+    <section class="market-bar">
+
+        <div class="market-box">
+
+            <span>FUTURE</span>
+
+            <strong id="futureLtp">
+                -
+            </strong>
+
+        </div>
+
+
+        <div class="market-box call-box">
+
+            <span>CALL</span>
+
+            <strong id="callLtp">
+                -
+            </strong>
+
+        </div>
+
+
+        <div class="market-box put-box">
+
+            <span>PUT</span>
+
+            <strong id="putLtp">
+                -
+            </strong>
+
+        </div>
+
+    </section>
+
+
+    <main class="dashboard">
+
+        <!-- FUTURE CHART -->
+
+        <section class="chart-panel future-panel">
+
+            <div class="chart-header">
+
+                <div>
+
+                    <strong>
+                        Future
+                    </strong>
+
+                    <span id="futureName">
+                        -
+                    </span>
+
+                </div>
+
+                <div class="chart-indicator">
+                    SHA
+                </div>
+
+            </div>
+
+            <canvas id="futureChart"></canvas>
+
+        </section>
+
+
+        <!-- CALL + PUT -->
+
+        <section class="right-column">
+
+
+            <!-- CALL -->
+
+            <section class="chart-panel">
+
+                <div class="chart-header">
+
+                    <div>
+
+                        <strong>
+                            CALL
+                        </strong>
+
+                        <span id="callName">
+                            Call Loading...
+                        </span>
+
+                    </div>
+
+                    <select id="callSelect">
+
+                        <option>
+                            Call
+                        </option>
+
+                    </select>
+
+                </div>
+
+                <canvas id="callChart"></canvas>
+
+            </section>
+
+
+            <!-- PUT -->
+
+            <section class="chart-panel">
+
+                <div class="chart-header">
+
+                    <div>
+
+                        <strong>
+                            PUT
+                        </strong>
+
+                        <span id="putName">
+                            Put Loading...
+                        </span>
+
+                    </div>
+
+                    <select id="putSelect">
+
+                        <option>
+                            Put
+                        </option>
+
+                    </select>
+
+                </div>
+
+                <canvas id="putChart"></canvas>
+
+            </section>
+
+        </section>
+
+    </main>
+
+
+    <section class="status-panel">
+
+        <span id="statusMessage">
+            Waiting for market data...
+        </span>
+
+    </section>
+
+
+    <!-- JavaScript -->
+
+    <script src="/js/indicators.js"></script>
+    <script src="/js/charts.js"></script>
+    <script src="/js/controls.js"></script>
+    <script src="/js/websocket.js"></script>
+    <script src="/js/app.js"></script>
+
+</div>
+
+</body>
+</html>
