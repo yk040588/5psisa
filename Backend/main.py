@@ -1,19 +1,29 @@
 from __future__ import annotations
 
-import asyncio
 import inspect
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 from Backend.broker import broker
 from Backend.instruments import (
+    HISTORICAL_EXPIRY_COUNT,
+    OTM_CALL_COUNT,
+    OTM_PUT_COUNT,
     SUPPORTED_UNDERLYINGS,
+    UPCOMING_EXPIRY_COUNT,
     instrument_manager,
 )
 from Backend import market_data
@@ -48,15 +58,24 @@ logger = logging.getLogger("5paisa.main")
 
 
 # ============================================================
-# CONFIGURATION
+# PHASE 1 CONFIGURATION
 # ============================================================
 
 DEFAULT_SYMBOL = "NIFTY"
 DEFAULT_TIMEFRAME = "5m"
 
-OTM_CALL_COUNT = 15
-OTM_PUT_COUNT = 15
+# Phase 1:
+# Automatically select 5 OTM Calls + 5 OTM Puts.
+# These values are imported from instruments.py so both
+# backend files always use the same configuration.
+OTM_CALL_COUNT = 5
+OTM_PUT_COUNT = 5
 
+# Phase 1 expiry limits.
+UPCOMING_EXPIRY_COUNT = 5
+HISTORICAL_EXPIRY_COUNT = 20
+
+# Trading/order placement is NOT part of Phase 1.
 TRADING_ENABLED = False
 ORDERS_ENABLED = False
 
@@ -67,9 +86,9 @@ ORDERS_ENABLED = False
 
 async def maybe_await(value: Any) -> Any:
     """
-    Allows us to work with both synchronous and asynchronous
-    methods in existing backend modules.
+    Works with both synchronous and asynchronous methods.
     """
+
     if inspect.isawaitable(value):
         return await value
 
@@ -77,20 +96,29 @@ async def maybe_await(value: Any) -> Any:
 
 
 def safe_dict(value: Any) -> dict:
+    """
+    Converts an object/dataclass/dict to a normal dictionary.
+    """
+
     if isinstance(value, dict):
         return value
 
     if hasattr(value, "to_dict"):
+
         try:
             result = value.to_dict()
+
             if isinstance(result, dict):
                 return result
+
         except Exception:
             pass
 
     if hasattr(value, "__dict__"):
+
         try:
             return dict(value.__dict__)
+
         except Exception:
             pass
 
@@ -98,6 +126,10 @@ def safe_dict(value: Any) -> dict:
 
 
 def safe_list(value: Any) -> list:
+    """
+    Converts possible result types to a list.
+    """
+
     if value is None:
         return []
 
@@ -115,44 +147,117 @@ def safe_list(value: Any) -> list:
 
 def normalize_instrument(item: Any) -> dict:
     """
-    Converts dataclass/object/dict instrument into JSON-safe dict.
+    Converts Instrument/dataclass/object/dict to JSON-safe dict.
     """
 
     if isinstance(item, dict):
         result = dict(item)
 
     elif hasattr(item, "to_dict"):
+
         try:
             result = item.to_dict()
+
         except Exception:
             result = safe_dict(item)
 
     else:
         result = safe_dict(item)
 
-    # Normalize common field names.
-    if "scrip_code" in result and "ScripCode" not in result:
+    # Common aliases.
+    if (
+        "scrip_code" in result
+        and "ScripCode" not in result
+    ):
         result["ScripCode"] = result["scrip_code"]
 
-    if "broker_token" in result and "Token" not in result:
+    if (
+        "broker_token" in result
+        and "Token" not in result
+    ):
         result["Token"] = result["broker_token"]
 
-    if "exchange" in result and "Exch" not in result:
+    if (
+        "exchange" in result
+        and "Exch" not in result
+    ):
         result["Exch"] = result["exchange"]
 
-    if "exchange_type" in result and "ExchType" not in result:
+    if (
+        "exchange_type" in result
+        and "ExchType" not in result
+    ):
         result["ExchType"] = result["exchange_type"]
 
-    if "expiry" in result and result["expiry"] is not None:
-        result["expiry"] = str(result["expiry"])
+    if (
+        "expiry" in result
+        and result["expiry"] is not None
+    ):
+        result["expiry"] = str(
+            result["expiry"]
+        )
 
     return result
 
 
-def instrument_to_xstream(item: Any) -> dict | None:
+def normalize_expiry_value(value: Any) -> str | None:
     """
-    Converts our Instrument object to the exact fields needed
-    by Xstream MarketFeedV3 subscription.
+    Converts expiry response values into YYYY-MM-DD strings.
+    """
+
+    if value is None:
+        return None
+
+    if isinstance(value, dict):
+
+        value = (
+            value.get("expiry")
+            or value.get("Expiry")
+            or value.get("ExpiryDate")
+        )
+
+    if value is None:
+        return None
+
+    return str(value)
+
+
+def unique_strings(values: list[Any]) -> list[str]:
+    """
+    Removes duplicate expiry values while preserving order.
+    """
+
+    result = []
+    seen = set()
+
+    for value in values:
+
+        normalized = normalize_expiry_value(
+            value
+        )
+
+        if not normalized:
+            continue
+
+        if normalized in seen:
+            continue
+
+        seen.add(normalized)
+        result.append(normalized)
+
+    return result
+
+
+# ============================================================
+# XSTREAM INSTRUMENT FORMAT
+# ============================================================
+
+def instrument_to_xstream(
+    item: Any,
+) -> dict | None:
+    """
+    Converts our Instrument object to the fields required by
+    the Xstream MarketFeedV3 subscription.
     """
 
     data = normalize_instrument(item)
@@ -173,14 +278,25 @@ def instrument_to_xstream(item: Any) -> dict | None:
         data.get("ScripCode")
         or data.get("scrip_code")
         or data.get("Scripcode")
+        or data.get("Token")
     )
 
-    if exchange is None or exchange_type is None or scrip_code is None:
+    if (
+        exchange is None
+        or exchange_type is None
+        or scrip_code is None
+    ):
         return None
 
     try:
-        scrip_code = int(scrip_code)
-    except (TypeError, ValueError):
+        scrip_code = int(
+            scrip_code
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ):
         return None
 
     return {
@@ -196,17 +312,23 @@ def instrument_to_xstream(item: Any) -> dict | None:
 
 async def broker_is_connected() -> bool:
     """
-    Reads broker connection state without assuming a particular
-    implementation of broker.py.
+    Reads broker connection state.
     """
 
     try:
-        value = getattr(broker, "connected", False)
+
+        value = getattr(
+            broker,
+            "connected",
+            False,
+        )
 
         if callable(value):
             value = value()
 
-        value = await maybe_await(value)
+        value = await maybe_await(
+            value
+        )
 
         return bool(value)
 
@@ -216,17 +338,23 @@ async def broker_is_connected() -> bool:
 
 async def broker_login() -> bool:
     """
-    Attempts broker login if the current broker implementation
-    provides login().
+    Attempts broker login if available.
     """
 
     try:
-        login_method = getattr(broker, "login", None)
+
+        login_method = getattr(
+            broker,
+            "login",
+            None,
+        )
 
         if login_method is None:
             return False
 
-        result = await maybe_await(login_method())
+        result = await maybe_await(
+            login_method()
+        )
 
         if isinstance(result, bool):
             return result
@@ -234,31 +362,48 @@ async def broker_login() -> bool:
         return await broker_is_connected()
 
     except Exception as exc:
-        logger.warning("Broker login not completed: %s", exc)
+
+        logger.warning(
+            "Broker login not completed: %s",
+            exc,
+        )
+
         return False
 
 
 async def broker_logout() -> None:
+
     try:
-        logout_method = getattr(broker, "logout", None)
+
+        logout_method = getattr(
+            broker,
+            "logout",
+            None,
+        )
 
         if logout_method is not None:
-            await maybe_await(logout_method())
+            await maybe_await(
+                logout_method()
+            )
 
     except Exception as exc:
-        logger.warning("Broker logout error: %s", exc)
+
+        logger.warning(
+            "Broker logout error: %s",
+            exc,
+        )
 
 
 # ============================================================
-# INSTRUMENT MANAGER HELPERS
+# INSTRUMENT MASTER HELPERS
 # ============================================================
 
 async def update_instruments() -> Any:
     """
-    Loads/updates the 5paisa Scrip Master.
+    Loads/updates official 5paisa Scrip Master.
 
-    Supports different method names used by earlier versions
-    of instruments.py.
+    If internet is unavailable, instruments.py keeps the
+    existing local master.
     """
 
     candidates = [
@@ -271,40 +416,64 @@ async def update_instruments() -> Any:
     ]
 
     for method_name in candidates:
-        method = getattr(instrument_manager, method_name, None)
+
+        method = getattr(
+            instrument_manager,
+            method_name,
+            None,
+        )
 
         if method is None:
             continue
 
         try:
-            result = await maybe_await(method())
-            logger.info("Instrument manager updated using %s()", method_name)
+
+            result = await maybe_await(
+                method()
+            )
+
+            logger.info(
+                "Instrument manager updated using %s()",
+                method_name,
+            )
+
             return result
 
         except TypeError:
             continue
 
         except Exception as exc:
+
             logger.warning(
                 "Instrument update using %s() failed: %s",
                 method_name,
                 exc,
             )
+
             return None
 
-    logger.warning("No instrument update method found.")
+    logger.warning(
+        "No instrument update method found."
+    )
+
     return None
 
 
 def instrument_status() -> dict:
     """
-    Returns best-effort instrument manager status.
+    Best-effort instrument manager status.
     """
 
     try:
-        method = getattr(instrument_manager, "status", None)
+
+        method = getattr(
+            instrument_manager,
+            "status",
+            None,
+        )
 
         if method is not None:
+
             result = method()
 
             if isinstance(result, dict):
@@ -323,10 +492,23 @@ def instrument_status() -> dict:
         "is_loaded",
         "_loaded",
     ):
-        if hasattr(instrument_manager, attr):
+
+        if hasattr(
+            instrument_manager,
+            attr,
+        ):
+
             try:
-                result["loaded"] = bool(getattr(instrument_manager, attr))
+
+                result["loaded"] = bool(
+                    getattr(
+                        instrument_manager,
+                        attr,
+                    )
+                )
+
                 break
+
             except Exception:
                 pass
 
@@ -335,15 +517,38 @@ def instrument_status() -> dict:
         "_instruments",
         "all_instruments",
     ):
-        if hasattr(instrument_manager, attr):
+
+        if hasattr(
+            instrument_manager,
+            attr,
+        ):
+
             try:
-                value = getattr(instrument_manager, attr)
 
-                if isinstance(value, dict):
-                    result["instrument_count"] = len(value)
+                value = getattr(
+                    instrument_manager,
+                    attr,
+                )
 
-                elif isinstance(value, (list, tuple, set)):
-                    result["instrument_count"] = len(value)
+                if isinstance(
+                    value,
+                    dict,
+                ):
+                    result[
+                        "instrument_count"
+                    ] = len(value)
+
+                elif isinstance(
+                    value,
+                    (
+                        list,
+                        tuple,
+                        set,
+                    ),
+                ):
+                    result[
+                        "instrument_count"
+                    ] = len(value)
 
                 break
 
@@ -354,68 +559,256 @@ def instrument_status() -> dict:
 
 
 # ============================================================
-# INSTRUMENT QUERY HELPERS
+# EXPIRY HELPERS
 # ============================================================
 
-async def get_expiries(symbol: str) -> list:
-    method = getattr(instrument_manager, "get_expiries", None)
+async def get_expiry_summary(
+    symbol: str,
+) -> dict:
+    """
+    Phase 1 expiry structure:
+
+        upcoming   -> latest 5
+        historical -> latest 20 expired
+    """
+
+    symbol = symbol.upper().strip()
+
+    method = getattr(
+        instrument_manager,
+        "get_expiry_summary",
+        None,
+    )
+
+    if method is not None:
+
+        try:
+
+            result = await maybe_await(
+                method(symbol)
+            )
+
+            if isinstance(
+                result,
+                dict,
+            ):
+
+                upcoming = unique_strings(
+                    safe_list(
+                        result.get(
+                            "upcoming",
+                            [],
+                        )
+                    )
+                )
+
+                historical = unique_strings(
+                    safe_list(
+                        result.get(
+                            "historical",
+                            [],
+                        )
+                    )
+                )
+
+                return {
+                    "underlying": symbol,
+                    "upcoming": upcoming[
+                        :UPCOMING_EXPIRY_COUNT
+                    ],
+                    "historical": historical[
+                        :HISTORICAL_EXPIRY_COUNT
+                    ],
+                }
+
+        except Exception as exc:
+
+            logger.warning(
+                "get_expiry_summary(%s) failed: %s",
+                symbol,
+                exc,
+            )
+
+    # Fallback.
+    method = getattr(
+        instrument_manager,
+        "get_expiries",
+        None,
+    )
 
     if method is None:
-        return []
+
+        return {
+            "underlying": symbol,
+            "upcoming": [],
+            "historical": [],
+        }
 
     try:
-        result = await maybe_await(method(symbol))
-        return safe_list(result)
 
-    except Exception as exc:
-        logger.warning("get_expiries(%s) failed: %s", symbol, exc)
-        return []
+        result = await maybe_await(
+            method(symbol)
+        )
 
+        all_expiries = unique_strings(
+            safe_list(result)
+        )
 
-async def get_futures(symbol: str, expiry: str | None = None) -> list:
-    method = getattr(instrument_manager, "get_futures", None)
+        # If fallback is used, the manager may already
+        # provide the correct sorted list. We use the first
+        # five as upcoming. Historical data can only be
+        # identified accurately when manager exposes the
+        # historical method.
+        historical_method = getattr(
+            instrument_manager,
+            "get_historical_expiries",
+            None,
+        )
 
-    if method is None:
-        return []
+        upcoming_method = getattr(
+            instrument_manager,
+            "get_upcoming_expiries",
+            None,
+        )
 
-    try:
-        if expiry:
-            try:
-                result = await maybe_await(method(symbol, expiry))
-            except TypeError:
-                result = await maybe_await(method(symbol))
+        upcoming = []
+
+        historical = []
+
+        if upcoming_method is not None:
+
+            upcoming = unique_strings(
+                safe_list(
+                    await maybe_await(
+                        upcoming_method(
+                            symbol,
+                            UPCOMING_EXPIRY_COUNT,
+                        )
+                    )
+                )
+            )
+
         else:
-            result = await maybe_await(method(symbol))
 
-        return safe_list(result)
+            upcoming = all_expiries[
+                :UPCOMING_EXPIRY_COUNT
+            ]
+
+        if historical_method is not None:
+
+            historical = unique_strings(
+                safe_list(
+                    await maybe_await(
+                        historical_method(
+                            symbol,
+                            HISTORICAL_EXPIRY_COUNT,
+                        )
+                    )
+                )
+            )
+
+        return {
+            "underlying": symbol,
+            "upcoming": upcoming[
+                :UPCOMING_EXPIRY_COUNT
+            ],
+            "historical": historical[
+                :HISTORICAL_EXPIRY_COUNT
+            ],
+        }
 
     except Exception as exc:
-        logger.warning("get_futures(%s) failed: %s", symbol, exc)
-        return []
+
+        logger.warning(
+            "Expiry lookup failed for %s: %s",
+            symbol,
+            exc,
+        )
+
+        return {
+            "underlying": symbol,
+            "upcoming": [],
+            "historical": [],
+        }
 
 
-async def get_options(
+async def get_expiries(
+    symbol: str,
+) -> list[str]:
+    """
+    Compatibility list.
+
+    Order:
+        latest 5 upcoming
+        followed by latest 20 historical
+
+    This keeps the old /api/expiries response usable while
+    the new grouped fields are also returned.
+    """
+
+    summary = await get_expiry_summary(
+        symbol
+    )
+
+    return (
+        summary["upcoming"]
+        + summary["historical"]
+    )
+
+
+# ============================================================
+# FUTURE HELPERS
+# ============================================================
+
+async def get_futures(
     symbol: str,
     expiry: str | None = None,
 ) -> list:
-    method = getattr(instrument_manager, "get_options", None)
+
+    method = getattr(
+        instrument_manager,
+        "get_futures",
+        None,
+    )
 
     if method is None:
         return []
 
     try:
+
         if expiry:
+
             try:
-                result = await maybe_await(method(symbol, expiry))
+
+                result = await maybe_await(
+                    method(
+                        symbol,
+                        expiry,
+                    )
+                )
+
             except TypeError:
-                result = await maybe_await(method(symbol))
+
+                result = await maybe_await(
+                    method(symbol)
+                )
+
         else:
-            result = await maybe_await(method(symbol))
+
+            result = await maybe_await(
+                method(symbol)
+            )
 
         return safe_list(result)
 
     except Exception as exc:
-        logger.warning("get_options(%s) failed: %s", symbol, exc)
+
+        logger.warning(
+            "get_futures(%s) failed: %s",
+            symbol,
+            exc,
+        )
+
         return []
 
 
@@ -423,31 +816,164 @@ async def get_nearest_future(
     symbol: str,
     expiry: str | None = None,
 ) -> Any:
-    method = getattr(instrument_manager, "get_nearest_future", None)
+
+    method = getattr(
+        instrument_manager,
+        "get_nearest_future",
+        None,
+    )
 
     if method is None:
-        futures = await get_futures(symbol, expiry)
 
-        return futures[0] if futures else None
+        futures = await get_futures(
+            symbol,
+            expiry,
+        )
+
+        return (
+            futures[0]
+            if futures
+            else None
+        )
 
     try:
-        if expiry:
-            try:
-                return await maybe_await(method(symbol, expiry))
-            except TypeError:
-                return await maybe_await(method(symbol))
 
-        return await maybe_await(method(symbol))
+        if expiry:
+
+            try:
+
+                return await maybe_await(
+                    method(
+                        symbol,
+                        expiry,
+                    )
+                )
+
+            except TypeError:
+
+                return await maybe_await(
+                    method(symbol)
+                )
+
+        return await maybe_await(
+            method(symbol)
+        )
 
     except Exception as exc:
+
         logger.warning(
             "get_nearest_future(%s) failed: %s",
             symbol,
             exc,
         )
 
-        futures = await get_futures(symbol, expiry)
-        return futures[0] if futures else None
+        futures = await get_futures(
+            symbol,
+            expiry,
+        )
+
+        return (
+            futures[0]
+            if futures
+            else None
+        )
+
+
+# ============================================================
+# OPTIONS HELPERS
+# ============================================================
+
+async def get_options(
+    symbol: str,
+    expiry: str | None = None,
+) -> list:
+    """
+    Returns all options when supported by manager.
+
+    Phase 1 dashboard uses get_otm_options() below for the
+    automatic 5+5 selection.
+    """
+
+    method = getattr(
+        instrument_manager,
+        "get_options",
+        None,
+    )
+
+    if method is None:
+
+        # Fallback using get_instruments_for_expiry.
+        method = getattr(
+            instrument_manager,
+            "get_instruments_for_expiry",
+            None,
+        )
+
+        if method is None or expiry is None:
+            return []
+
+        try:
+
+            calls = await maybe_await(
+                method(
+                    symbol,
+                    expiry,
+                    "CALL",
+                )
+            )
+
+            puts = await maybe_await(
+                method(
+                    symbol,
+                    expiry,
+                    "PUT",
+                )
+            )
+
+            return (
+                safe_list(calls)
+                + safe_list(puts)
+            )
+
+        except Exception:
+            return []
+
+    try:
+
+        if expiry:
+
+            try:
+
+                result = await maybe_await(
+                    method(
+                        symbol,
+                        expiry,
+                    )
+                )
+
+            except TypeError:
+
+                result = await maybe_await(
+                    method(symbol)
+                )
+
+        else:
+
+            result = await maybe_await(
+                method(symbol)
+            )
+
+        return safe_list(result)
+
+    except Exception as exc:
+
+        logger.warning(
+            "get_options(%s) failed: %s",
+            symbol,
+            exc,
+        )
+
+        return []
 
 
 async def get_otm_options(
@@ -456,74 +982,158 @@ async def get_otm_options(
     underlying_price: float | None,
 ) -> tuple[list, list]:
     """
-    Uses the final instruments.py OTM-15 implementation.
+    Phase 1 automatic selection:
 
-    Returns:
-        calls, puts
+        5 OTM Calls
+        5 OTM Puts
+
+    instruments.py uses reference_price.
+    This helper passes the same value under that name.
     """
 
-    method = getattr(instrument_manager, "get_otm_options", None)
+    if expiry is None:
+        return [], []
+
+    if underlying_price is None:
+        return [], []
+
+    try:
+
+        reference_price = float(
+            underlying_price
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+        return [], []
+
+    if reference_price <= 0:
+        return [], []
+
+    method = getattr(
+        instrument_manager,
+        "get_otm_options",
+        None,
+    )
 
     if method is None:
         return [], []
 
     try:
-        # Preferred final signature.
+
+        # Final instruments.py signature.
+        result = await maybe_await(
+            method(
+                underlying=symbol,
+                expiry=expiry,
+                reference_price=reference_price,
+                call_count=OTM_CALL_COUNT,
+                put_count=OTM_PUT_COUNT,
+            )
+        )
+
+        if isinstance(
+            result,
+            dict,
+        ):
+
+            calls = result.get(
+                "calls",
+                [],
+            )
+
+            puts = result.get(
+                "puts",
+                [],
+            )
+
+            return (
+                safe_list(calls)[
+                    :OTM_CALL_COUNT
+                ],
+                safe_list(puts)[
+                    :OTM_PUT_COUNT
+                ],
+            )
+
+        if (
+            isinstance(result, tuple)
+            and len(result) == 2
+        ):
+
+            return (
+                safe_list(result[0])[
+                    :OTM_CALL_COUNT
+                ],
+                safe_list(result[1])[
+                    :OTM_PUT_COUNT
+                ],
+            )
+
+        return [], []
+
+    except TypeError:
+
+        # Compatibility fallback for an older manager.
         try:
+
             result = await maybe_await(
                 method(
-                    symbol=symbol,
-                    expiry=expiry,
-                    underlying_price=underlying_price,
-                    call_count=OTM_CALL_COUNT,
-                    put_count=OTM_PUT_COUNT,
+                    symbol,
+                    expiry,
+                    reference_price,
                 )
             )
 
-        except TypeError:
+            if isinstance(
+                result,
+                dict,
+            ):
 
-            try:
-                result = await maybe_await(
-                    method(
-                        symbol,
-                        expiry,
-                        underlying_price,
-                        OTM_CALL_COUNT,
-                        OTM_PUT_COUNT,
-                    )
+                return (
+                    safe_list(
+                        result.get(
+                            "calls",
+                            [],
+                        )
+                    )[:OTM_CALL_COUNT],
+                    safe_list(
+                        result.get(
+                            "puts",
+                            [],
+                        )
+                    )[:OTM_PUT_COUNT],
                 )
 
-            except TypeError:
+            if (
+                isinstance(result, tuple)
+                and len(result) == 2
+            ):
 
-                result = await maybe_await(
-                    method(
-                        symbol,
-                        expiry,
-                        underlying_price,
-                    )
+                return (
+                    safe_list(result[0])[
+                        :OTM_CALL_COUNT
+                    ],
+                    safe_list(result[1])[
+                        :OTM_PUT_COUNT
+                    ],
                 )
 
-        if isinstance(result, tuple) and len(result) == 2:
-            return safe_list(result[0]), safe_list(result[1])
+        except Exception as exc:
 
-        if isinstance(result, dict):
-            calls = (
-                result.get("calls")
-                or result.get("call")
-                or []
+            logger.warning(
+                "OTM fallback failed for %s/%s: %s",
+                symbol,
+                expiry,
+                exc,
             )
-
-            puts = (
-                result.get("puts")
-                or result.get("put")
-                or []
-            )
-
-            return safe_list(calls), safe_list(puts)
 
         return [], []
 
     except Exception as exc:
+
         logger.warning(
             "OTM selection failed for %s/%s: %s",
             symbol,
@@ -538,18 +1148,27 @@ async def get_otm_options(
 # PRICE EXTRACTION
 # ============================================================
 
-def extract_price(data: Any) -> float | None:
-    """
-    Extract LTP/price from instrument, quote or market-feed object.
-    """
+def extract_price(
+    data: Any,
+) -> float | None:
 
     if data is None:
         return None
 
-    if isinstance(data, (int, float)):
+    if isinstance(
+        data,
+        (
+            int,
+            float,
+        ),
+    ):
         return float(data)
 
-    if isinstance(data, dict):
+    if isinstance(
+        data,
+        dict,
+    ):
+
         keys = [
             "LastRate",
             "LTP",
@@ -564,14 +1183,23 @@ def extract_price(data: Any) -> float | None:
         ]
 
         for key in keys:
-            value = data.get(key)
+
+            value = data.get(
+                key
+            )
 
             if value is None:
                 continue
 
             try:
-                return float(value)
-            except (TypeError, ValueError):
+                return float(
+                    value
+                )
+
+            except (
+                TypeError,
+                ValueError,
+            ):
                 continue
 
     for attr in (
@@ -585,33 +1213,44 @@ def extract_price(data: Any) -> float | None:
         "Close",
         "close",
     ):
+
         try:
-            value = getattr(data, attr)
+
+            value = getattr(
+                data,
+                attr,
+            )
 
             if value is None:
                 continue
 
-            return float(value)
+            return float(
+                value
+            )
 
-        except (AttributeError, TypeError, ValueError):
+        except (
+            AttributeError,
+            TypeError,
+            ValueError,
+        ):
             continue
 
     return None
 
 
-async def get_future_price(future: Any) -> float | None:
+async def get_future_price(
+    future: Any,
+) -> float | None:
     """
-    Gets current Future price.
+    Gets Future reference price.
 
-    Phase 1 prefers a broker quote/snapshot if available,
-    otherwise uses price information already present on
-    the instrument.
+    Broker quote is preferred when available.
+    Otherwise falls back to the instrument.
     """
 
     if future is None:
         return None
 
-    # First try broker quote methods.
     for method_name in (
         "get_quote",
         "quote",
@@ -619,12 +1258,19 @@ async def get_future_price(future: Any) -> float | None:
         "get_market_snapshot",
         "market_snapshot",
     ):
-        method = getattr(broker, method_name, None)
+
+        method = getattr(
+            broker,
+            method_name,
+            None,
+        )
 
         if method is None:
             continue
 
-        data = normalize_instrument(future)
+        data = normalize_instrument(
+            future
+        )
 
         exchange = (
             data.get("Exch")
@@ -642,12 +1288,15 @@ async def get_future_price(future: Any) -> float | None:
         )
 
         try:
-            # Try object first.
+
             try:
-                result = await maybe_await(method(future))
+
+                result = await maybe_await(
+                    method(future)
+                )
+
             except TypeError:
 
-                # Try common broker arguments.
                 result = await maybe_await(
                     method(
                         exchange,
@@ -656,7 +1305,9 @@ async def get_future_price(future: Any) -> float | None:
                     )
                 )
 
-            price = extract_price(result)
+            price = extract_price(
+                result
+            )
 
             if price is not None:
                 return price
@@ -664,11 +1315,13 @@ async def get_future_price(future: Any) -> float | None:
         except Exception:
             continue
 
-    return extract_price(future)
+    return extract_price(
+        future
+    )
 
 
 # ============================================================
-# MARKET DATA HELPERS
+# HISTORICAL DATA
 # ============================================================
 
 async def historical_data(
@@ -681,10 +1334,11 @@ async def historical_data(
     limit: int,
 ) -> list:
     """
-    Calls existing market_data.py implementation.
+    Calls existing market_data.py historical data method.
 
-    The helper supports several method names/signatures so that
-    the new main.py remains compatible with the current backend.
+    refresh=False is intentional for Phase 1 so local/cache
+    historical data can continue to work without live broker
+    connection.
     """
 
     candidates = [
@@ -697,16 +1351,25 @@ async def historical_data(
     method = None
 
     for method_name in candidates:
-        candidate = getattr(market_data, method_name, None)
+
+        candidate = getattr(
+            market_data,
+            method_name,
+            None,
+        )
 
         if candidate is not None:
+
             method = candidate
             break
 
     if method is None:
+
         raise HTTPException(
             status_code=500,
-            detail="Historical data method is not available.",
+            detail=(
+                "Historical data method is not available."
+            ),
         )
 
     kwargs = {
@@ -721,14 +1384,20 @@ async def historical_data(
     }
 
     try:
-        result = await maybe_await(method(**kwargs))
-        return safe_list(result)
+
+        result = await maybe_await(
+            method(**kwargs)
+        )
+
+        return safe_list(
+            result
+        )
 
     except TypeError:
         pass
 
-    # Compatibility fallback.
     try:
+
         result = await maybe_await(
             method(
                 symbol,
@@ -741,73 +1410,91 @@ async def historical_data(
             )
         )
 
-        return safe_list(result)
+        return safe_list(
+            result
+        )
 
     except Exception as exc:
+
         raise HTTPException(
             status_code=500,
-            detail=f"Historical data error: {exc}",
+            detail=(
+                f"Historical data error: {exc}"
+            ),
         )
 
 
 # ============================================================
-# XSTREAM SUBSCRIPTION HELPERS
+# WEBSOCKET SUBSCRIPTIONS
 # ============================================================
 
 async def subscribe_instruments(
     instruments: list[Any],
 ) -> Any:
     """
-    Sends selected Future + OTM-15 Calls + OTM-15 Puts
-    to the WebSocket manager.
-
-    The actual Xstream MarketFeedV3 protocol remains inside
-    websocket_manager.py.
+    Subscribes Future + 5 OTM Calls + 5 OTM Puts.
     """
 
     normalized = []
 
     for item in instruments:
+
         if item is None:
             continue
 
-        xstream_item = instrument_to_xstream(item)
+        xstream_item = instrument_to_xstream(
+            item
+        )
 
         if xstream_item is not None:
-            normalized.append(xstream_item)
+            normalized.append(
+                xstream_item
+            )
 
     if not normalized:
         return None
 
-    # Preferred API.
     for method_name in (
         "subscribe",
         "subscribe_instruments",
         "subscribe_tokens",
     ):
-        method = getattr(websocket_manager, method_name, None)
+
+        method = getattr(
+            websocket_manager,
+            method_name,
+            None,
+        )
 
         if method is None:
             continue
 
         try:
-            return await maybe_await(method(normalized))
+
+            return await maybe_await(
+                method(normalized)
+            )
 
         except TypeError:
+
             try:
+
                 return await maybe_await(
                     method(
                         normalized
                     )
                 )
+
             except Exception:
                 continue
 
         except Exception as exc:
+
             logger.warning(
                 "WebSocket subscribe failed: %s",
                 exc,
             )
+
             return None
 
     logger.warning(
@@ -818,31 +1505,38 @@ async def subscribe_instruments(
 
 
 async def unsubscribe_all() -> Any:
-    """
-    Clears current broker subscriptions when selection changes.
-    """
 
     for method_name in (
         "unsubscribe_all",
         "unsubscribe",
         "clear_subscriptions",
     ):
-        method = getattr(websocket_manager, method_name, None)
+
+        method = getattr(
+            websocket_manager,
+            method_name,
+            None,
+        )
 
         if method is None:
             continue
 
         try:
-            return await maybe_await(method())
+
+            return await maybe_await(
+                method()
+            )
 
         except TypeError:
             continue
 
         except Exception as exc:
+
             logger.warning(
                 "WebSocket unsubscribe failed: %s",
                 exc,
             )
+
             return None
 
     return None
@@ -857,161 +1551,268 @@ async def build_dashboard(
     expiry: str | None = None,
 ) -> dict:
     """
-    Main Phase-1 dashboard pipeline:
+    Phase 1 dashboard flow:
 
-        Symbol
+        SYMBOL
           ↓
-        Expiry
+        EXPIRY
           ↓
-        Future
+        FUTURE
           ↓
-        Future price
+        FUTURE PRICE
           ↓
-        15 OTM Calls
-        15 OTM Puts
+        5 OTM CALLS
+        5 OTM PUTS
           ↓
-        Xstream subscription
+        SUBSCRIPTION
     """
 
     symbol = symbol.upper().strip()
 
     if symbol not in SUPPORTED_UNDERLYINGS:
+
         raise HTTPException(
             status_code=400,
             detail=(
                 f"Unsupported symbol '{symbol}'. "
-                f"Supported symbols: {SUPPORTED_UNDERLYINGS}"
+                f"Supported symbols: "
+                f"{list(SUPPORTED_UNDERLYINGS)}"
             ),
         )
 
     # --------------------------------------------------------
-    # Expiry
+    # EXPIRY SUMMARY
     # --------------------------------------------------------
 
-    expiries = await get_expiries(symbol)
+    expiry_summary = await get_expiry_summary(
+        symbol
+    )
 
-    normalized_expiries = []
+    upcoming_expiries = (
+        expiry_summary["upcoming"]
+    )
 
-    for item in expiries:
-        if isinstance(item, dict):
-            value = (
-                item.get("expiry")
-                or item.get("Expiry")
-                or item.get("ExpiryDate")
-            )
+    historical_expiries = (
+        expiry_summary["historical"]
+    )
 
-            if value is not None:
-                normalized_expiries.append(str(value))
+    all_allowed_expiries = (
+        upcoming_expiries
+        + historical_expiries
+    )
 
-        else:
-            normalized_expiries.append(str(item))
+    # --------------------------------------------------------
+    # SELECT EXPIRY
+    # --------------------------------------------------------
 
     if expiry:
-        selected_expiry = str(expiry)
-    else:
+
         selected_expiry = (
-            normalized_expiries[0]
-            if normalized_expiries
+            normalize_expiry_value(
+                expiry
+            )
+        )
+
+        # If selected expiry isn't in the Phase 1
+        # visible list, fall back to latest upcoming.
+        if (
+            selected_expiry
+            not in all_allowed_expiries
+        ):
+
+            selected_expiry = (
+                upcoming_expiries[0]
+                if upcoming_expiries
+                else None
+            )
+
+    else:
+
+        # Default = nearest upcoming expiry.
+        selected_expiry = (
+            upcoming_expiries[0]
+            if upcoming_expiries
             else None
         )
 
     # --------------------------------------------------------
-    # Future
+    # FUTURE
     # --------------------------------------------------------
 
-    future = await get_nearest_future(
-        symbol,
-        selected_expiry,
+    future = None
+
+    if selected_expiry:
+
+        future = await get_nearest_future(
+            symbol,
+            selected_expiry,
+        )
+
+    # Fallback: nearest active future.
+    if future is None:
+
+        future = await get_nearest_future(
+            symbol
+        )
+
+    future_data = (
+        normalize_instrument(future)
+        if future is not None
+        else {}
     )
 
-    future_data = normalize_instrument(future) if future else {}
-
-    future_price = await get_future_price(future)
-
     # --------------------------------------------------------
-    # OTM-15
+    # FUTURE REFERENCE PRICE
     # --------------------------------------------------------
 
-    calls, puts = await get_otm_options(
-        symbol=symbol,
-        expiry=selected_expiry,
-        underlying_price=future_price,
+    future_price = await get_future_price(
+        future
     )
 
-    # Safety limit.
-    calls = calls[:OTM_CALL_COUNT]
-    puts = puts[:OTM_PUT_COUNT]
+    # --------------------------------------------------------
+    # AUTOMATIC OTM 5 + 5
+    # --------------------------------------------------------
+
+    calls = []
+    puts = []
+
+    if (
+        selected_expiry is not None
+        and future_price is not None
+    ):
+
+        calls, puts = await get_otm_options(
+            symbol=symbol,
+            expiry=selected_expiry,
+            underlying_price=future_price,
+        )
+
+    # Absolute safety limit.
+    calls = calls[
+        :OTM_CALL_COUNT
+    ]
+
+    puts = puts[
+        :OTM_PUT_COUNT
+    ]
 
     # --------------------------------------------------------
-    # Subscribe Future + 15 CE + 15 PE
+    # SUBSCRIBE
     # --------------------------------------------------------
 
     selected_instruments = []
 
     if future is not None:
-        selected_instruments.append(future)
+        selected_instruments.append(
+            future
+        )
 
-    selected_instruments.extend(calls)
-    selected_instruments.extend(puts)
+    selected_instruments.extend(
+        calls
+    )
 
+    selected_instruments.extend(
+        puts
+    )
+
+    # Clear old selection before subscribing new selection.
     await unsubscribe_all()
 
     if selected_instruments:
-        await subscribe_instruments(selected_instruments)
+
+        await subscribe_instruments(
+            selected_instruments
+        )
 
     # --------------------------------------------------------
-    # Response
+    # RETURN DASHBOARD
     # --------------------------------------------------------
 
     return {
         "success": True,
-        "symbol": symbol,
-        "expiry": selected_expiry,
-        "expiries": normalized_expiries,
 
+        "symbol": symbol,
+
+        "expiry": selected_expiry,
+
+        # Compatibility field.
+        "expiries": all_allowed_expiries,
+
+        # Phase 1 explicit expiry groups.
+        "upcoming_expiries": upcoming_expiries,
+
+        "historical_expiries": historical_expiries,
+
+        "upcoming_expiry_count": len(
+            upcoming_expiries
+        ),
+
+        "historical_expiry_count": len(
+            historical_expiries
+        ),
+
+        # Future.
         "future": future_data,
 
         "future_price": future_price,
 
         "futures": (
-            [normalize_instrument(future)]
+            [
+                future_data
+            ]
             if future is not None
             else []
         ),
 
+        # Automatic OTM Calls.
         "calls": [
             normalize_instrument(item)
             for item in calls
         ],
 
+        # Automatic OTM Puts.
         "puts": [
             normalize_instrument(item)
             for item in puts
         ],
 
-        "otm_call_count": len(calls),
-        "otm_put_count": len(puts),
+        "otm_call_count": len(
+            calls
+        ),
 
+        "otm_put_count": len(
+            puts
+        ),
+
+        # Currently selected contracts.
         "selected": {
             "future": future_data,
+
             "call": (
-                normalize_instrument(calls[0])
+                normalize_instrument(
+                    calls[0]
+                )
                 if calls
                 else None
             ),
+
             "put": (
-                normalize_instrument(puts[0])
+                normalize_instrument(
+                    puts[0]
+                )
                 if puts
                 else None
             ),
         },
 
+        # Live-feed information.
         "live_feed": {
             "provider": "5paisa Xstream",
             "protocol": "MarketFeedV3",
             "enabled": True,
         },
 
+        # SHA indicator configuration.
         "sha": {
             "enabled": True,
             "before_smoothing_length": 10,
@@ -1019,6 +1820,7 @@ async def build_dashboard(
             "ma_type": "EMA",
         },
 
+        # Phase 1 trading state.
         "trading": {
             "enabled": TRADING_ENABLED,
             "orders_enabled": ORDERS_ENABLED,
@@ -1033,55 +1835,39 @@ async def build_dashboard(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
-    logger.info("Starting 5paisa Trading Dashboard...")
+    logger.info(
+        "Starting 5paisa Trading Dashboard..."
+    )
 
     # --------------------------------------------------------
-    # Load Scrip Master
+    # Load / update instrument master.
+    #
+    # If internet is unavailable, instruments.py retains the
+    # existing local master.
     # --------------------------------------------------------
 
     try:
+
         await update_instruments()
+
     except Exception as exc:
+
         logger.warning(
             "Instrument initialization failed: %s",
             exc,
         )
 
     # --------------------------------------------------------
-    # Start WebSocket manager
-    # --------------------------------------------------------
-
-    try:
-        start_method = getattr(
-            websocket_manager,
-            "start",
-            None,
-        )
-
-        if start_method is not None:
-            await maybe_await(start_method())
-
-            logger.info(
-                "Market WebSocket manager started."
-            )
-
-    except Exception as exc:
-        logger.warning(
-            "WebSocket manager startup failed: %s",
-            exc,
-        )
-
-    # --------------------------------------------------------
-    # Broker login
+    # Broker
     #
-    # Do not force application startup to fail if credentials
-    # are not configured yet. Historical/cache functionality
-    # can still work.
+    # Phase 1 does not force broker login.
+    # Historical/cache functionality can work separately.
     # --------------------------------------------------------
 
     connected = await broker_is_connected()
 
     if not connected:
+
         logger.info(
             "5paisa broker is not connected at startup."
         )
@@ -1094,10 +1880,12 @@ async def lifespan(app: FastAPI):
 
     try:
         await unsubscribe_all()
+
     except Exception:
         pass
 
     try:
+
         stop_method = getattr(
             websocket_manager,
             "stop",
@@ -1105,9 +1893,13 @@ async def lifespan(app: FastAPI):
         )
 
         if stop_method is not None:
-            await maybe_await(stop_method())
+
+            await maybe_await(
+                stop_method()
+            )
 
     except Exception as exc:
+
         logger.warning(
             "WebSocket manager shutdown error: %s",
             exc,
@@ -1155,25 +1947,43 @@ app.add_middleware(
 # FRONTEND ROUTES
 # ============================================================
 
-@app.get("/", include_in_schema=False)
+@app.get(
+    "/",
+    include_in_schema=False,
+)
 async def serve_index():
+
     if not INDEX_FILE.exists():
+
         raise HTTPException(
             status_code=404,
-            detail="Frontend/index.html not found.",
+            detail=(
+                "Frontend/index.html not found."
+            ),
         )
 
-    return FileResponse(INDEX_FILE)
+    return FileResponse(
+        INDEX_FILE
+    )
 
 
-@app.get("/index.html", include_in_schema=False)
+@app.get(
+    "/index.html",
+    include_in_schema=False,
+)
 async def serve_index_html():
+
     return await serve_index()
 
 
-@app.get("/app.js", include_in_schema=False)
+@app.get(
+    "/app.js",
+    include_in_schema=False,
+)
 async def serve_app_js():
+
     if not APP_JS_FILE.exists():
+
         raise HTTPException(
             status_code=404,
             detail="Frontend/app.js not found.",
@@ -1185,9 +1995,14 @@ async def serve_app_js():
     )
 
 
-@app.get("/charts.js", include_in_schema=False)
+@app.get(
+    "/charts.js",
+    include_in_schema=False,
+)
 async def serve_charts_js():
+
     if not CHARTS_JS_FILE.exists():
+
         raise HTTPException(
             status_code=404,
             detail="Frontend/charts.js not found.",
@@ -1199,9 +2014,14 @@ async def serve_charts_js():
     )
 
 
-@app.get("/controls.js", include_in_schema=False)
+@app.get(
+    "/controls.js",
+    include_in_schema=False,
+)
 async def serve_controls_js():
+
     if not CONTROLS_JS_FILE.exists():
+
         raise HTTPException(
             status_code=404,
             detail="Frontend/controls.js not found.",
@@ -1213,12 +2033,19 @@ async def serve_controls_js():
     )
 
 
-@app.get("/indicators.js", include_in_schema=False)
+@app.get(
+    "/indicators.js",
+    include_in_schema=False,
+)
 async def serve_indicators_js():
+
     if not INDICATORS_JS_FILE.exists():
+
         raise HTTPException(
             status_code=404,
-            detail="Frontend/indicators.js not found.",
+            detail=(
+                "Frontend/indicators.js not found."
+            ),
         )
 
     return FileResponse(
@@ -1227,12 +2054,19 @@ async def serve_indicators_js():
     )
 
 
-@app.get("/style.css", include_in_schema=False)
+@app.get(
+    "/style.css",
+    include_in_schema=False,
+)
 async def serve_style_css():
+
     if not STYLE_CSS_FILE.exists():
+
         raise HTTPException(
             status_code=404,
-            detail="Frontend/style.css not found.",
+            detail=(
+                "Frontend/style.css not found."
+            ),
         )
 
     return FileResponse(
@@ -1247,9 +2081,12 @@ async def serve_style_css():
 
 @app.get("/api/health")
 async def health():
+
     return {
         "status": "ok",
-        "application": "5paisa Trading Dashboard",
+        "application": (
+            "5paisa Trading Dashboard"
+        ),
         "phase": 1,
         "trading_enabled": TRADING_ENABLED,
         "orders_enabled": ORDERS_ENABLED,
@@ -1262,21 +2099,37 @@ async def health():
 
 @app.get("/api/status")
 async def status():
+
     connected = await broker_is_connected()
 
     return {
         "status": "ok",
+
         "broker": {
             "name": "5paisa",
             "connected": connected,
         },
+
         "instruments": instrument_status(),
+
         "websocket": {
             "provider": "5paisa Xstream",
             "protocol": "MarketFeedV3",
             "enabled": True,
         },
+
         "phase": 1,
+
+        "otm": {
+            "calls": OTM_CALL_COUNT,
+            "puts": OTM_PUT_COUNT,
+        },
+
+        "expiry": {
+            "upcoming": UPCOMING_EXPIRY_COUNT,
+            "historical": HISTORICAL_EXPIRY_COUNT,
+        },
+
         "trading_enabled": TRADING_ENABLED,
         "orders_enabled": ORDERS_ENABLED,
     }
@@ -1288,9 +2141,12 @@ async def status():
 
 @app.get("/api/symbols")
 async def symbols():
+
     return {
         "success": True,
-        "symbols": list(SUPPORTED_UNDERLYINGS),
+        "symbols": list(
+            SUPPORTED_UNDERLYINGS
+        ),
         "default": DEFAULT_SYMBOL,
     }
 
@@ -1301,39 +2157,67 @@ async def symbols():
 
 @app.get("/api/expiries")
 async def expiries(
-    symbol: str = Query(DEFAULT_SYMBOL),
+    symbol: str = Query(
+        DEFAULT_SYMBOL
+    ),
 ):
+
     symbol = symbol.upper().strip()
 
     if symbol not in SUPPORTED_UNDERLYINGS:
+
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported symbol: {symbol}",
+            detail=(
+                f"Unsupported symbol: {symbol}"
+            ),
         )
 
-    values = await get_expiries(symbol)
+    summary = await get_expiry_summary(
+        symbol
+    )
 
-    result = []
+    upcoming = summary[
+        "upcoming"
+    ]
 
-    for value in values:
+    historical = summary[
+        "historical"
+    ]
 
-        if isinstance(value, dict):
-            expiry = (
-                value.get("expiry")
-                or value.get("Expiry")
-                or value.get("ExpiryDate")
-            )
-
-            if expiry is not None:
-                result.append(str(expiry))
-
-        else:
-            result.append(str(value))
+    # Compatibility:
+    # old frontend can continue using "expiries".
+    combined = (
+        upcoming
+        + historical
+    )
 
     return {
         "success": True,
+
         "symbol": symbol,
-        "expiries": result,
+
+        # New Phase 1 structure.
+        "upcoming_expiries": upcoming,
+
+        "historical_expiries": historical,
+
+        # Compatibility.
+        "expiries": combined,
+
+        "upcoming_count": len(
+            upcoming
+        ),
+
+        "historical_count": len(
+            historical
+        ),
+
+        "default_expiry": (
+            upcoming[0]
+            if upcoming
+            else None
+        ),
     }
 
 
@@ -1343,15 +2227,23 @@ async def expiries(
 
 @app.get("/api/futures")
 async def futures(
-    symbol: str = Query(DEFAULT_SYMBOL),
-    expiry: str | None = Query(None),
+    symbol: str = Query(
+        DEFAULT_SYMBOL
+    ),
+    expiry: str | None = Query(
+        None
+    ),
 ):
+
     symbol = symbol.upper().strip()
 
     if symbol not in SUPPORTED_UNDERLYINGS:
+
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported symbol: {symbol}",
+            detail=(
+                f"Unsupported symbol: {symbol}"
+            ),
         )
 
     values = await get_futures(
@@ -1363,6 +2255,7 @@ async def futures(
         "success": True,
         "symbol": symbol,
         "expiry": expiry,
+
         "futures": [
             normalize_instrument(item)
             for item in values
@@ -1376,16 +2269,28 @@ async def futures(
 
 @app.get("/api/options")
 async def options(
-    symbol: str = Query(DEFAULT_SYMBOL),
-    expiry: str | None = Query(None),
-    underlying_price: float | None = Query(None),
+    symbol: str = Query(
+        DEFAULT_SYMBOL
+    ),
+
+    expiry: str | None = Query(
+        None
+    ),
+
+    underlying_price: float | None = Query(
+        None
+    ),
 ):
+
     symbol = symbol.upper().strip()
 
     if symbol not in SUPPORTED_UNDERLYINGS:
+
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported symbol: {symbol}",
+            detail=(
+                f"Unsupported symbol: {symbol}"
+            ),
         )
 
     calls, puts = await get_otm_options(
@@ -1394,25 +2299,41 @@ async def options(
         underlying_price=underlying_price,
     )
 
+    calls = calls[
+        :OTM_CALL_COUNT
+    ]
+
+    puts = puts[
+        :OTM_PUT_COUNT
+    ]
+
     return {
         "success": True,
+
         "symbol": symbol,
+
         "expiry": expiry,
+
+        "reference_price": (
+            underlying_price
+        ),
+
         "calls": [
             normalize_instrument(item)
-            for item in calls[:OTM_CALL_COUNT]
+            for item in calls
         ],
+
         "puts": [
             normalize_instrument(item)
-            for item in puts[:OTM_PUT_COUNT]
+            for item in puts
         ],
-        "otm_call_count": min(
-            len(calls),
-            OTM_CALL_COUNT,
+
+        "otm_call_count": len(
+            calls
         ),
-        "otm_put_count": min(
-            len(puts),
-            OTM_PUT_COUNT,
+
+        "otm_put_count": len(
+            puts
         ),
     }
 
@@ -1423,9 +2344,15 @@ async def options(
 
 @app.get("/api/dashboard")
 async def dashboard(
-    symbol: str = Query(DEFAULT_SYMBOL),
-    expiry: str | None = Query(None),
+    symbol: str = Query(
+        DEFAULT_SYMBOL
+    ),
+
+    expiry: str | None = Query(
+        None
+    ),
 ):
+
     return await build_dashboard(
         symbol=symbol,
         expiry=expiry,
@@ -1438,16 +2365,29 @@ async def dashboard(
 
 @app.get("/api/historical")
 async def historical(
-    symbol: str = Query(DEFAULT_SYMBOL),
-    expiry: str | None = Query(None),
+    symbol: str = Query(
+        DEFAULT_SYMBOL
+    ),
 
-    instrument_type: str = Query("FUTURE"),
+    expiry: str | None = Query(
+        None
+    ),
 
-    strike: float | None = Query(None),
+    instrument_type: str = Query(
+        "FUTURE"
+    ),
 
-    option_type: str | None = Query(None),
+    strike: float | None = Query(
+        None
+    ),
 
-    timeframe: str = Query(DEFAULT_TIMEFRAME),
+    option_type: str | None = Query(
+        None
+    ),
+
+    timeframe: str = Query(
+        DEFAULT_TIMEFRAME
+    ),
 
     limit: int = Query(
         500,
@@ -1455,13 +2395,22 @@ async def historical(
         le=2000,
     ),
 ):
+
     symbol = symbol.upper().strip()
-    instrument_type = instrument_type.upper().strip()
+
+    instrument_type = (
+        instrument_type
+        .upper()
+        .strip()
+    )
 
     if symbol not in SUPPORTED_UNDERLYINGS:
+
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported symbol: {symbol}",
+            detail=(
+                f"Unsupported symbol: {symbol}"
+            ),
         )
 
     valid_types = {
@@ -1471,6 +2420,7 @@ async def historical(
     }
 
     if instrument_type not in valid_types:
+
         raise HTTPException(
             status_code=400,
             detail=(
@@ -1480,7 +2430,12 @@ async def historical(
         )
 
     if option_type:
-        option_type = option_type.upper().strip()
+
+        option_type = (
+            option_type
+            .upper()
+            .strip()
+        )
 
         if option_type not in {
             "CALL",
@@ -1488,9 +2443,12 @@ async def historical(
             "CE",
             "PE",
         }:
+
             raise HTTPException(
                 status_code=400,
-                detail="Invalid option_type.",
+                detail=(
+                    "Invalid option_type."
+                ),
             )
 
     candles = await historical_data(
@@ -1505,13 +2463,21 @@ async def historical(
 
     return {
         "success": True,
+
         "symbol": symbol,
+
         "expiry": expiry,
+
         "instrument_type": instrument_type,
+
         "strike": strike,
+
         "option_type": option_type,
+
         "timeframe": timeframe,
+
         "count": len(candles),
+
         "candles": candles,
     }
 
@@ -1520,8 +2486,11 @@ async def historical(
 # INSTRUMENT MASTER REFRESH
 # ============================================================
 
-@app.post("/api/instruments/update")
+@app.post(
+    "/api/instruments/update"
+)
 async def instruments_update():
+
     result = await update_instruments()
 
     return {
@@ -1531,9 +2500,11 @@ async def instruments_update():
     }
 
 
-# Compatibility alias for earlier frontend/backend versions.
-@app.post("/api/instruments/refresh")
+@app.post(
+    "/api/instruments/refresh"
+)
 async def instruments_refresh():
+
     return await instruments_update()
 
 
@@ -1541,11 +2512,10 @@ async def instruments_refresh():
 # 5PAISA LOGIN
 # ============================================================
 
-@app.get("/api/5paisa/login")
+@app.get(
+    "/api/5paisa/login"
+)
 async def fivepaisa_login():
-    """
-    Starts OAuth login using broker.py implementation.
-    """
 
     candidates = (
         "get_login_url",
@@ -1556,21 +2526,30 @@ async def fivepaisa_login():
 
     for method_name in candidates:
 
-        method = getattr(broker, method_name, None)
+        method = getattr(
+            broker,
+            method_name,
+            None,
+        )
 
         if method is None:
             continue
 
         try:
-            url = await maybe_await(method())
+
+            url = await maybe_await(
+                method()
+            )
 
             if url:
+
                 return {
                     "success": True,
                     "login_url": str(url),
                 }
 
         except Exception as exc:
+
             logger.warning(
                 "Login URL generation failed: %s",
                 exc,
@@ -1579,8 +2558,8 @@ async def fivepaisa_login():
     raise HTTPException(
         status_code=501,
         detail=(
-            "OAuth login URL is not available in "
-            "the current broker.py implementation."
+            "OAuth login URL is not available "
+            "in the current broker.py implementation."
         ),
     )
 
@@ -1589,15 +2568,16 @@ async def fivepaisa_login():
 # 5PAISA CALLBACK
 # ============================================================
 
-@app.get("/api/5paisa/callback")
+@app.get(
+    "/api/5paisa/callback"
+)
 async def fivepaisa_callback(
     request: Request,
 ):
-    """
-    Receives OAuth callback and passes RequestToken to broker.py.
-    """
 
-    params = dict(request.query_params)
+    params = dict(
+        request.query_params
+    )
 
     request_token = (
         params.get("RequestToken")
@@ -1606,12 +2586,17 @@ async def fivepaisa_callback(
     )
 
     if not request_token:
+
         return JSONResponse(
             status_code=400,
             content={
                 "success": False,
-                "error": "RequestToken not found.",
-                "received_parameters": list(params.keys()),
+                "error": (
+                    "RequestToken not found."
+                ),
+                "received_parameters": list(
+                    params.keys()
+                ),
             },
         )
 
@@ -1624,7 +2609,11 @@ async def fivepaisa_callback(
 
     for method_name in candidates:
 
-        method = getattr(broker, method_name, None)
+        method = getattr(
+            broker,
+            method_name,
+            None,
+        )
 
         if method is None:
             continue
@@ -1632,10 +2621,14 @@ async def fivepaisa_callback(
         try:
 
             result = await maybe_await(
-                method(request_token)
+                method(
+                    request_token
+                )
             )
 
-            connected = await broker_is_connected()
+            connected = (
+                await broker_is_connected()
+            )
 
             return {
                 "success": True,
@@ -1670,8 +2663,11 @@ async def fivepaisa_callback(
 # BROKER LOGIN DIRECT
 # ============================================================
 
-@app.post("/api/5paisa/login")
+@app.post(
+    "/api/5paisa/login"
+)
 async def fivepaisa_login_post():
+
     connected = await broker_login()
 
     return {
@@ -1689,15 +2685,6 @@ async def fivepaisa_login_post():
 async def browser_websocket(
     websocket: WebSocket,
 ):
-    """
-    Browser-facing WebSocket.
-
-    Actual 5paisa MarketFeedV3 connection is maintained by
-    websocket_manager.py.
-
-    This endpoint is for sending live market events to the
-    browser and receiving selection/ping messages.
-    """
 
     await websocket.accept()
 
@@ -1705,7 +2692,6 @@ async def browser_websocket(
         "Browser WebSocket connected."
     )
 
-    # Register browser with websocket manager when supported.
     registered = False
 
     for method_name in (
@@ -1724,6 +2710,7 @@ async def browser_websocket(
             continue
 
         try:
+
             await maybe_await(
                 method(websocket)
             )
@@ -1732,6 +2719,7 @@ async def browser_websocket(
             break
 
         except Exception as exc:
+
             logger.warning(
                 "Browser registration failed: %s",
                 exc,
@@ -1743,7 +2731,10 @@ async def browser_websocket(
 
             message = await websocket.receive_json()
 
-            if not isinstance(message, dict):
+            if not isinstance(
+                message,
+                dict,
+            ):
                 continue
 
             message_type = (
@@ -1757,7 +2748,7 @@ async def browser_websocket(
             ).lower()
 
             # ------------------------------------------------
-            # Ping
+            # PING
             # ------------------------------------------------
 
             if message_type == "ping":
@@ -1769,7 +2760,7 @@ async def browser_websocket(
                 continue
 
             # ------------------------------------------------
-            # Dashboard selection
+            # DASHBOARD SELECTION
             # ------------------------------------------------
 
             if message_type in {
@@ -1783,7 +2774,9 @@ async def browser_websocket(
                     or DEFAULT_SYMBOL
                 )
 
-                expiry = message.get("expiry")
+                expiry = message.get(
+                    "expiry"
+                )
 
                 try:
 
@@ -1807,7 +2800,7 @@ async def browser_websocket(
                 continue
 
             # ------------------------------------------------
-            # Subscribe
+            # SUBSCRIBE
             # ------------------------------------------------
 
             if message_type == "subscribe":
@@ -1835,7 +2828,7 @@ async def browser_websocket(
                 continue
 
             # ------------------------------------------------
-            # Unknown message
+            # UNKNOWN
             # ------------------------------------------------
 
             await websocket.send_json({
@@ -1876,6 +2869,7 @@ async def browser_websocket(
                     continue
 
                 try:
+
                     await maybe_await(
                         method(websocket)
                     )
@@ -1890,15 +2884,20 @@ async def browser_websocket(
 # LEGACY WEBSOCKET ALIAS
 # ============================================================
 
-@app.websocket("/api/ws")
+@app.websocket(
+    "/api/ws"
+)
 async def browser_websocket_alias(
     websocket: WebSocket,
 ):
-    await browser_websocket(websocket)
+
+    await browser_websocket(
+        websocket
+    )
 
 
 # ============================================================
-# ERROR HANDLER
+# GLOBAL ERROR HANDLER
 # ============================================================
 
 @app.exception_handler(Exception)
@@ -1906,6 +2905,7 @@ async def global_exception_handler(
     request: Request,
     exc: Exception,
 ):
+
     logger.exception(
         "Unhandled application error: %s",
         exc,
@@ -1933,5 +2933,4 @@ if __name__ == "__main__":
         host="127.0.0.1",
         port=8000,
         reload=True,
-    )
-```
+    )s
