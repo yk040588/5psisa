@@ -4,7 +4,7 @@ import csv
 import io
 import logging
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Iterable
 
@@ -12,12 +12,11 @@ import requests
 
 from config.settings import settings
 
-
 logger = logging.getLogger(__name__)
 
 
 # ============================================================
-# 5PAISA XSTREAM - OFFICIAL SCRIP MASTER
+# 5PAISA OFFICIAL SCRIP MASTER
 # ============================================================
 
 SCRIP_MASTER_URL = (
@@ -28,7 +27,7 @@ SCRIP_MASTER_URL = (
 
 
 # ============================================================
-# PHASE 1 SUPPORTED UNDERLYINGS
+# PHASE 1 - ONLY THESE 5 UNDERLYINGS
 # ============================================================
 
 SUPPORTED_UNDERLYINGS = {
@@ -55,8 +54,26 @@ SUPPORTED_UNDERLYINGS = {
 }
 
 
-OTM_CALL_COUNT = 15
-OTM_PUT_COUNT = 15
+SUPPORTED_SCRIP_TYPES = {
+    "CE",
+    "PE",
+    "XX",
+}
+
+
+# ============================================================
+# PHASE 1 SETTINGS
+# ============================================================
+
+# Upcoming expiries shown in Phase 1
+UPCOMING_EXPIRY_COUNT = 5
+
+# Most recent expired expiries retained/shown in Phase 1
+HISTORICAL_EXPIRY_COUNT = 20
+
+# Automatic OTM selection
+OTM_CALL_COUNT = 5
+OTM_PUT_COUNT = 5
 
 
 # ============================================================
@@ -65,20 +82,6 @@ OTM_PUT_COUNT = 15
 
 @dataclass
 class Instrument:
-    """
-    Normalized 5paisa instrument.
-
-    Internal instrument types:
-        FUTURE
-        CALL
-        PUT
-
-    Xstream subscription uses:
-        exchange
-        exchange_type
-        broker_token / scrip_code
-    """
-
     underlying: str
     symbol: str
 
@@ -104,9 +107,7 @@ class Instrument:
 
     def to_dict(self) -> dict:
         data = asdict(self)
-
         data["scrip_code"] = self.broker_token
-
         return data
 
 
@@ -123,7 +124,7 @@ class InstrumentManager:
             settings.DATA_DIR / "scrip_master.csv"
         )
 
-        self.loaded: bool = False
+        self.loaded = False
         self.last_update: datetime | None = None
 
         self._token_index: dict[int, Instrument] = {}
@@ -132,7 +133,7 @@ class InstrumentManager:
         self._load_local()
 
     # ========================================================
-    # LOCAL MASTER
+    # LOCAL LOAD
     # ========================================================
 
     def _load_local(self) -> bool:
@@ -162,7 +163,7 @@ class InstrumentManager:
             return False
 
     # ========================================================
-    # DOWNLOAD / UPDATE MASTER
+    # DOWNLOAD + PERMANENT MERGE
     # ========================================================
 
     def update(self) -> bool:
@@ -175,20 +176,63 @@ class InstrumentManager:
 
             response.raise_for_status()
 
-            content = response.content
+            new_content = response.content
 
-            self.master_file.parent.mkdir(
-                parents=True,
-                exist_ok=True,
+            new_instruments = self._parse_csv(
+                new_content
             )
 
-            with open(
-                self.master_file,
-                "wb",
-            ) as file:
-                file.write(content)
+            old_instruments: list[Instrument] = []
 
-            self._load_csv(content)
+            if self.master_file.exists():
+
+                try:
+                    with open(
+                        self.master_file,
+                        "rb",
+                    ) as file:
+                        old_content = file.read()
+
+                    old_instruments = self._parse_csv(
+                        old_content
+                    )
+
+                except Exception:
+                    logger.exception(
+                        "Unable to read existing scrip master"
+                    )
+
+            merged: dict[int, Instrument] = {}
+
+            # Keep old instruments
+            for instrument in old_instruments:
+
+                if instrument.broker_token is not None:
+                    merged[
+                        instrument.broker_token
+                    ] = instrument
+
+            # New master data overrides old data
+            for instrument in new_instruments:
+
+                if instrument.broker_token is not None:
+                    merged[
+                        instrument.broker_token
+                    ] = instrument
+
+            instruments = list(
+                merged.values()
+            )
+
+            instruments.sort(
+                key=self._instrument_sort_key
+            )
+
+            self._write_csv(
+                instruments
+            )
+
+            self._load_local()
 
             self.last_update = datetime.now()
 
@@ -206,16 +250,21 @@ class InstrumentManager:
             return False
 
     # ========================================================
-    # CSV PARSER
+    # PARSE CSV
     # ========================================================
 
-    def _load_csv(self, content: bytes | str) -> None:
+    def _parse_csv(
+        self,
+        content: bytes | str,
+    ) -> list[Instrument]:
 
         if isinstance(content, bytes):
+
             text = content.decode(
                 "utf-8-sig",
                 errors="ignore",
             )
+
         else:
             text = str(content)
 
@@ -223,37 +272,51 @@ class InstrumentManager:
             io.StringIO(text)
         )
 
-        rows = list(reader)
-
-        instruments: list[Instrument] = []
+        result: list[Instrument] = []
 
         seen_tokens: set[int] = set()
 
-        for row in rows:
+        for row in reader:
 
             try:
-                instrument = self._convert_row(row)
+                instrument = self._convert_row(
+                    row
+                )
 
                 if instrument is None:
                     continue
 
                 token = instrument.broker_token
 
-                if token is None:
-                    continue
-
-                # Prevent duplicate ScripCodes.
-                if token in seen_tokens:
+                if (
+                    token is None
+                    or token in seen_tokens
+                ):
                     continue
 
                 seen_tokens.add(token)
 
-                instruments.append(instrument)
+                result.append(
+                    instrument
+                )
 
             except Exception:
-                # A malformed row must not break the complete
-                # instrument master.
                 continue
+
+        return result
+
+    # ========================================================
+    # LOAD CSV
+    # ========================================================
+
+    def _load_csv(
+        self,
+        content: bytes | str,
+    ) -> None:
+
+        instruments = self._parse_csv(
+            content
+        )
 
         self.instruments = instruments
 
@@ -264,6 +327,90 @@ class InstrumentManager:
         logger.info(
             "Loaded %s supported instruments",
             len(self.instruments),
+        )
+
+    # ========================================================
+    # WRITE FILTERED MASTER
+    # ========================================================
+
+    def _write_csv(
+        self,
+        instruments: Iterable[Instrument],
+    ) -> None:
+
+        self.master_file.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        fields = [
+            "Exch",
+            "ExchType",
+            "SymbolRoot",
+            "Name",
+            "ScripType",
+            "ScripCode",
+            "Expiry",
+            "StrikeRate",
+            "LotSize",
+            "TickSize",
+        ]
+
+        temp_file = self.master_file.with_suffix(
+            ".tmp"
+        )
+
+        with open(
+            temp_file,
+            "w",
+            newline="",
+            encoding="utf-8",
+        ) as file:
+
+            writer = csv.DictWriter(
+                file,
+                fieldnames=fields,
+            )
+
+            writer.writeheader()
+
+            for instrument in instruments:
+
+                if instrument.instrument_type == "CALL":
+                    scrip_type = "CE"
+
+                elif instrument.instrument_type == "PUT":
+                    scrip_type = "PE"
+
+                else:
+                    scrip_type = "XX"
+
+                writer.writerow({
+                    "Exch": instrument.exchange,
+                    "ExchType": instrument.exchange_type,
+                    "SymbolRoot": instrument.underlying,
+                    "Name": instrument.symbol,
+                    "ScripType": scrip_type,
+                    "ScripCode": (
+                        instrument.broker_token
+                        if instrument.broker_token is not None
+                        else ""
+                    ),
+                    "Expiry": (
+                        instrument.expiry
+                        or ""
+                    ),
+                    "StrikeRate": (
+                        instrument.strike
+                        if instrument.strike is not None
+                        else ""
+                    ),
+                    "LotSize": instrument.lot_size,
+                    "TickSize": instrument.tick_size,
+                })
+
+        temp_file.replace(
+            self.master_file
         )
 
     # ========================================================
@@ -290,10 +437,6 @@ class InstrumentManager:
         if not exchange or not exchange_type:
             return None
 
-        # ----------------------------------------------------
-        # SymbolRoot is preferred.
-        # ----------------------------------------------------
-
         symbol_root = self._value(
             row,
             "SymbolRoot",
@@ -311,8 +454,8 @@ class InstrumentManager:
         symbol_upper = symbol.upper()
 
         underlying = self._detect_underlying(
-            symbol_root=symbol_root,
-            symbol=symbol_upper,
+            symbol_root,
+            symbol_upper,
         )
 
         if underlying is None:
@@ -322,24 +465,19 @@ class InstrumentManager:
             underlying
         ]
 
-        # ----------------------------------------------------
-        # Exact exchange validation.
-        # ----------------------------------------------------
-
         if exchange != expected["exchange"]:
             return None
 
         if exchange_type != expected["exchange_type"]:
             return None
 
-        # ----------------------------------------------------
-        # Instrument classification.
-        # ----------------------------------------------------
-
         scrip_type = self._value(
             row,
             "ScripType",
         ).upper()
+
+        if scrip_type not in SUPPORTED_SCRIP_TYPES:
+            return None
 
         if scrip_type == "CE":
 
@@ -351,17 +489,10 @@ class InstrumentManager:
             instrument_type = "PUT"
             option_type = "PE"
 
-        elif scrip_type == "XX":
+        else:
 
             instrument_type = "FUTURE"
             option_type = None
-
-        else:
-            return None
-
-        # ----------------------------------------------------
-        # Scrip code.
-        # ----------------------------------------------------
 
         scrip_code = self._int_value(
             self._value(
@@ -375,10 +506,6 @@ class InstrumentManager:
         if scrip_code is None:
             return None
 
-        # ----------------------------------------------------
-        # Expiry.
-        # ----------------------------------------------------
-
         expiry = self._normalize_expiry(
             self._value(
                 row,
@@ -386,12 +513,6 @@ class InstrumentManager:
                 "ExpiryDate",
             )
         )
-
-        # ----------------------------------------------------
-        # Strike.
-        #
-        # Futures generally have no useful strike.
-        # ----------------------------------------------------
 
         strike = self._float_value(
             self._value(
@@ -405,10 +526,6 @@ class InstrumentManager:
         if instrument_type == "FUTURE":
             strike = None
 
-        # ----------------------------------------------------
-        # Lot size.
-        # ----------------------------------------------------
-
         lot_size = self._int_value(
             self._value(
                 row,
@@ -417,12 +534,8 @@ class InstrumentManager:
             default=1,
         )
 
-        if lot_size is None or lot_size <= 0:
+        if not lot_size or lot_size <= 0:
             lot_size = 1
-
-        # ----------------------------------------------------
-        # Tick size.
-        # ----------------------------------------------------
 
         tick_size = self._float_value(
             self._value(
@@ -450,183 +563,281 @@ class InstrumentManager:
         )
 
     # ========================================================
-    # UNDERLYING DETECTION
+    # EXPIRY HELPERS
     # ========================================================
 
     @staticmethod
-    def _detect_underlying(
-        symbol_root: str,
-        symbol: str,
-    ) -> str | None:
+    def _expiry_to_date(
+        expiry: str | None,
+    ) -> date | None:
 
-        # First priority: official SymbolRoot.
-        if symbol_root in SUPPORTED_UNDERLYINGS:
-            return symbol_root
-
-        # Fallback only when SymbolRoot is unavailable.
-        text = symbol.upper()
-
-        # Longest names first.
-        for underlying in sorted(
-            SUPPORTED_UNDERLYINGS,
-            key=len,
-            reverse=True,
-        ):
-            if underlying in text:
-                return underlying
-
-        return None
-
-    # ========================================================
-    # INDEXES
-    # ========================================================
-
-    def _build_indexes(self) -> None:
-
-        self._token_index = {}
-        self._symbol_index = {}
-
-        for instrument in self.instruments:
-
-            if instrument.broker_token is not None:
-                self._token_index[
-                    instrument.broker_token
-                ] = instrument
-
-            self._symbol_index[
-                instrument.symbol.upper()
-            ] = instrument
-
-    # ========================================================
-    # BASIC HELPERS
-    # ========================================================
-
-    @staticmethod
-    def _value(
-        row: dict,
-        *keys: str,
-    ) -> str:
-
-        for key in keys:
-
-            value = row.get(key)
-
-            if value is None:
-                continue
-
-            value = str(value).strip()
-
-            if value:
-                return value
-
-        return ""
-
-    @staticmethod
-    def _float_value(
-        value,
-    ) -> float | None:
-
-        if value is None:
+        if not expiry:
             return None
 
-        text = str(value).strip()
-
-        if not text:
-            return None
-
-        try:
-            return float(text)
-
-        except (TypeError, ValueError):
-            return None
-
-    @staticmethod
-    def _int_value(
-        value,
-        default: int | None = 1,
-    ) -> int | None:
-
-        if value is None:
-            return default
-
-        text = str(value).strip()
-
-        if not text:
-            return default
-
-        try:
-            return int(float(text))
-
-        except (TypeError, ValueError):
-            return default
-
-    # ========================================================
-    # EXPIRY NORMALIZATION
-    # ========================================================
-
-    @staticmethod
-    def _normalize_expiry(
-        value,
-    ) -> str | None:
-
-        if value is None:
-            return None
-
-        value = str(value).strip()
+        value = str(expiry).strip()
 
         if not value:
             return None
 
-        formats = [
-            "%Y-%m-%d",
+        # Already normalized
+        try:
+            return datetime.strptime(
+                value,
+                "%Y-%m-%d",
+            ).date()
+        except ValueError:
+            pass
+
+        # ISO datetime
+        try:
+            return datetime.fromisoformat(
+                value.replace("Z", "+00:00")
+            ).date()
+        except ValueError:
+            pass
+
+        # Common formats
+        formats = (
             "%d-%m-%Y",
             "%d/%m/%Y",
-            "%Y/%m/%d",
-            "%d-%b-%Y",
-            "%d%b%Y",
             "%Y%m%d",
-            "%d-%B-%Y",
+            "%d-%b-%Y",
             "%d %b %Y",
+            "%d-%B-%Y",
             "%d %B %Y",
-        ]
+            "%Y/%m/%d",
+            "%Y-%m-%d %H:%M:%S",
+        )
 
         for fmt in formats:
 
             try:
-
-                parsed = datetime.strptime(
+                return datetime.strptime(
                     value,
                     fmt,
-                )
-
-                return parsed.strftime(
-                    "%Y-%m-%d"
-                )
+                ).date()
 
             except ValueError:
                 continue
 
-        return value
+        return None
 
     # ========================================================
-    # SUPPORTED SYMBOLS
+    # ALL EXPIRIES
     # ========================================================
 
-    @staticmethod
-    def is_supported_underlying(
+    def get_expiries(
+        self,
         underlying: str,
-    ) -> bool:
+    ) -> list[str]:
+        """
+        Return all unique valid expiries.
 
-        if not underlying:
-            return False
+        Sorted oldest -> newest.
+        """
 
-        return (
-            str(underlying).upper()
-            in SUPPORTED_UNDERLYINGS
+        underlying = underlying.upper()
+
+        if underlying not in SUPPORTED_UNDERLYINGS:
+            return []
+
+        expiries: set[str] = set()
+
+        for instrument in self.instruments:
+
+            if instrument.underlying != underlying:
+                continue
+
+            if not instrument.expiry:
+                continue
+
+            expiry_date = self._expiry_to_date(
+                instrument.expiry
+            )
+
+            if expiry_date is None:
+                continue
+
+            expiries.add(
+                expiry_date.strftime(
+                    "%Y-%m-%d"
+                )
+            )
+
+        return sorted(
+            expiries
         )
 
     # ========================================================
-    # FUTURES
+    # LATEST 5 UPCOMING EXPIRIES
+    # ========================================================
+
+    def get_upcoming_expiries(
+        self,
+        underlying: str,
+        count: int = UPCOMING_EXPIRY_COUNT,
+    ) -> list[str]:
+
+        today = date.today()
+
+        expiries = self.get_expiries(
+            underlying
+        )
+
+        upcoming: list[str] = []
+
+        for expiry in expiries:
+
+            expiry_date = self._expiry_to_date(
+                expiry
+            )
+
+            if (
+                expiry_date is not None
+                and expiry_date >= today
+            ):
+                upcoming.append(
+                    expiry
+                )
+
+        upcoming.sort(
+            key=lambda value:
+                self._expiry_to_date(value)
+                or date.max
+        )
+
+        return upcoming[:count]
+
+    # ========================================================
+    # LATEST 20 HISTORICAL / EXPIRED EXPIRIES
+    # ========================================================
+
+    def get_historical_expiries(
+        self,
+        underlying: str,
+        count: int = HISTORICAL_EXPIRY_COUNT,
+    ) -> list[str]:
+
+        today = date.today()
+
+        expiries = self.get_expiries(
+            underlying
+        )
+
+        historical: list[str] = []
+
+        for expiry in expiries:
+
+            expiry_date = self._expiry_to_date(
+                expiry
+            )
+
+            if (
+                expiry_date is not None
+                and expiry_date < today
+            ):
+                historical.append(
+                    expiry
+                )
+
+        # Latest expired first
+        historical.sort(
+            key=lambda value:
+                self._expiry_to_date(value)
+                or date.min,
+            reverse=True,
+        )
+
+        return historical[:count]
+
+    # ========================================================
+    # PHASE 1 EXPIRY SUMMARY
+    # ========================================================
+
+    def get_expiry_summary(
+        self,
+        underlying: str,
+    ) -> dict:
+
+        underlying = underlying.upper()
+
+        if underlying not in SUPPORTED_UNDERLYINGS:
+            return {
+                "underlying": underlying,
+                "upcoming": [],
+                "historical": [],
+            }
+
+        upcoming = self.get_upcoming_expiries(
+            underlying,
+            UPCOMING_EXPIRY_COUNT,
+        )
+
+        historical = self.get_historical_expiries(
+            underlying,
+            HISTORICAL_EXPIRY_COUNT,
+        )
+
+        return {
+            "underlying": underlying,
+            "upcoming": upcoming,
+            "historical": historical,
+        }
+
+    # ========================================================
+    # GET INSTRUMENTS FOR EXPIRY
+    # ========================================================
+
+    def get_instruments_for_expiry(
+        self,
+        underlying: str,
+        expiry: str,
+        instrument_type: str | None = None,
+    ) -> list[Instrument]:
+
+        underlying = underlying.upper()
+
+        normalized_expiry = (
+            self._normalize_expiry(expiry)
+        )
+
+        if normalized_expiry is None:
+            return []
+
+        result: list[Instrument] = []
+
+        for instrument in self.instruments:
+
+            if instrument.underlying != underlying:
+                continue
+
+            if instrument.expiry != normalized_expiry:
+                continue
+
+            if instrument_type is not None:
+
+                if (
+                    instrument.instrument_type
+                    != instrument_type.upper()
+                ):
+                    continue
+
+            result.append(
+                instrument
+            )
+
+        result.sort(
+            key=lambda inst: (
+                inst.strike
+                if inst.strike is not None
+                else 0.0
+            )
+        )
+
+        return result
+
+    # ========================================================
+    # GET FUTURES
     # ========================================================
 
     def get_futures(
@@ -635,554 +846,611 @@ class InstrumentManager:
         expiry: str | None = None,
     ) -> list[Instrument]:
 
-        underlying = str(
-            underlying
-        ).upper()
+        underlying = underlying.upper()
 
-        result = [
-            item
-            for item in self.instruments
-            if (
-                item.underlying == underlying
-                and item.instrument_type == "FUTURE"
-            )
-        ]
+        normalized_expiry = None
 
         if expiry:
-            expiry = self._normalize_expiry(
-                expiry
+            normalized_expiry = (
+                self._normalize_expiry(expiry)
             )
 
-            result = [
-                item
-                for item in result
-                if item.expiry == expiry
-            ]
+        futures: list[Instrument] = []
 
-        return sorted(
-            result,
-            key=lambda item: (
-                item.expiry or "",
-                item.symbol,
-            ),
-        )
+        for instrument in self.instruments:
 
-    # ========================================================
-    # OPTIONS
-    # ========================================================
+            if instrument.underlying != underlying:
+                continue
 
-    def get_options(
-        self,
-        underlying: str,
-        expiry: str | None = None,
-        option_type: str | None = None,
-    ) -> list[Instrument]:
+            if instrument.instrument_type != "FUTURE":
+                continue
 
-        underlying = str(
-            underlying
-        ).upper()
-
-        result = [
-            item
-            for item in self.instruments
             if (
-                item.underlying == underlying
-                and item.instrument_type
-                in {"CALL", "PUT"}
-            )
-        ]
-
-        if expiry:
-            expiry = self._normalize_expiry(
-                expiry
-            )
-
-            result = [
-                item
-                for item in result
-                if item.expiry == expiry
-            ]
-
-        if option_type:
-
-            option_type = str(
-                option_type
-            ).upper()
-
-            # Accept both internal and broker naming.
-            aliases = {
-                "CALL": "CE",
-                "PUT": "PE",
-                "CE": "CE",
-                "PE": "PE",
-            }
-
-            option_type = aliases.get(
-                option_type,
-                option_type,
-            )
-
-            result = [
-                item
-                for item in result
-                if item.option_type == option_type
-            ]
-
-        return sorted(
-            result,
-            key=lambda item: (
-                item.strike
-                if item.strike is not None
-                else float("inf"),
-                item.symbol,
-            ),
-        )
-
-    # ========================================================
-    # EXPIRIES
-    # ========================================================
-
-    def get_expiries(
-        self,
-        underlying: str,
-    ) -> list[str]:
-
-        underlying = str(
-            underlying
-        ).upper()
-
-        expiries = {
-            item.expiry
-            for item in self.instruments
-            if (
-                item.underlying == underlying
-                and item.expiry
-            )
-        }
-
-        return sorted(expiries)
-
-    # ========================================================
-    # STRIKES
-    # ========================================================
-
-    def get_strikes(
-        self,
-        underlying: str,
-        expiry: str,
-        option_type: str | None = None,
-    ) -> list[float]:
-
-        options = self.get_options(
-            underlying=underlying,
-            expiry=expiry,
-            option_type=option_type,
-        )
-
-        strikes = {
-            item.strike
-            for item in options
-            if item.strike is not None
-        }
-
-        return sorted(strikes)
-
-    # ========================================================
-    # FIND OPTION
-    # ========================================================
-
-    def find_option(
-        self,
-        underlying: str,
-        expiry: str,
-        strike: float,
-        option_type: str,
-    ) -> Instrument | None:
-
-        underlying = str(
-            underlying
-        ).upper()
-
-        expiry = self._normalize_expiry(
-            expiry
-        )
-
-        option_type = str(
-            option_type
-        ).upper()
-
-        aliases = {
-            "CALL": "CE",
-            "PUT": "PE",
-        }
-
-        option_type = aliases.get(
-            option_type,
-            option_type,
-        )
-
-        try:
-            target_strike = float(
-                strike
-            )
-
-        except (TypeError, ValueError):
-            return None
-
-        for item in self.instruments:
-
-            if item.underlying != underlying:
+                normalized_expiry is not None
+                and instrument.expiry != normalized_expiry
+            ):
                 continue
 
-            if item.expiry != expiry:
-                continue
+            futures.append(
+                instrument
+            )
 
-            if item.option_type != option_type:
-                continue
-
-            if item.strike is None:
-                continue
-
-            # Small floating-point tolerance.
-            if abs(
-                item.strike - target_strike
-            ) <= 0.0001:
-                return item
-
-        return None
-
-    # ========================================================
-    # FIND BY TOKEN / SCRIP CODE
-    # ========================================================
-
-    def find_by_token(
-        self,
-        token,
-    ) -> Instrument | None:
-
-        token_int = self._int_value(
-            token,
-            default=None,
+        futures.sort(
+            key=lambda inst: (
+                self._expiry_to_date(
+                    inst.expiry
+                )
+                or date.max
+            )
         )
 
-        if token_int is None:
-            return None
-
-        return self._token_index.get(
-            token_int
-        )
+        return futures
 
     # ========================================================
-    # FIND BY SYMBOL
-    # ========================================================
-
-    def find_by_symbol(
-        self,
-        symbol: str,
-    ) -> Instrument | None:
-
-        if not symbol:
-            return None
-
-        return self._symbol_index.get(
-            str(symbol).upper()
-        )
-
-    # ========================================================
-    # NEAREST FUTURE
+    # GET NEAREST FUTURE
     # ========================================================
 
     def get_nearest_future(
         self,
         underlying: str,
+        expiry: str | None = None,
     ) -> Instrument | None:
 
+        underlying = underlying.upper()
+
         futures = self.get_futures(
-            underlying
+            underlying,
+            expiry,
         )
 
-        if not futures:
-            return None
-
-        today = datetime.now().date()
-
-        valid = []
-
-        for item in futures:
-
-            if not item.expiry:
-                continue
-
-            try:
-                expiry_date = datetime.strptime(
-                    item.expiry,
-                    "%Y-%m-%d",
-                ).date()
-
-            except ValueError:
-                continue
-
-            if expiry_date >= today:
-                valid.append(
-                    (expiry_date, item)
-                )
-
-        if valid:
-            valid.sort(
-                key=lambda pair: pair[0]
+        if expiry is not None:
+            return (
+                futures[0]
+                if futures
+                else None
             )
 
-            return valid[0][1]
+        today = date.today()
 
-        return futures[0]
+        valid_futures: list[Instrument] = []
+
+        for instrument in futures:
+
+            expiry_date = self._expiry_to_date(
+                instrument.expiry
+            )
+
+            if expiry_date is None:
+                continue
+
+            if expiry_date < today:
+                continue
+
+            valid_futures.append(
+                instrument
+            )
+
+        valid_futures.sort(
+            key=lambda inst:
+                self._expiry_to_date(
+                    inst.expiry
+                )
+                or date.max
+        )
+
+        return (
+            valid_futures[0]
+            if valid_futures
+            else None
+        )
 
     # ========================================================
-    # OTM-15 CALLS
-    #
-    # Spot/Future price:
-    #
-    # Calls:
-    #   strike > underlying price
-    #
-    # Select nearest 15 OTM strikes.
+    # OTM CALLS
     # ========================================================
 
     def get_otm_calls(
         self,
         underlying: str,
         expiry: str,
-        underlying_price: float,
+        reference_price: float,
         count: int = OTM_CALL_COUNT,
     ) -> list[Instrument]:
+        """
+        OTM CALL:
+
+            strike > reference price
+
+        Returns nearest OTM strikes first.
+        """
 
         try:
-            price = float(
-                underlying_price
+            reference_price = float(
+                reference_price
             )
-
-        except (TypeError, ValueError):
+        except (
+            TypeError,
+            ValueError,
+        ):
             return []
 
-        if price <= 0:
+        if reference_price <= 0:
             return []
 
-        options = self.get_options(
-            underlying=underlying,
-            expiry=expiry,
-            option_type="CE",
+        calls = self.get_instruments_for_expiry(
+            underlying,
+            expiry,
+            "CALL",
         )
 
-        otm = [
-            item
-            for item in options
+        otm_calls = [
+            instrument
+            for instrument in calls
             if (
-                item.strike is not None
-                and item.strike > price
+                instrument.strike is not None
+                and instrument.strike > reference_price
             )
         ]
 
-        otm.sort(
-            key=lambda item: item.strike
+        otm_calls.sort(
+            key=lambda instrument:
+                instrument.strike - reference_price
+                if instrument.strike is not None
+                else float("inf")
         )
 
-        return otm[:max(0, int(count))]
+        return otm_calls[:count]
 
     # ========================================================
-    # OTM-15 PUTS
-    #
-    # Puts:
-    #   strike < underlying price
-    #
-    # Nearest strikes below price.
+    # OTM PUTS
     # ========================================================
 
     def get_otm_puts(
         self,
         underlying: str,
         expiry: str,
-        underlying_price: float,
+        reference_price: float,
         count: int = OTM_PUT_COUNT,
     ) -> list[Instrument]:
+        """
+        OTM PUT:
+
+            strike < reference price
+
+        Returns nearest OTM strikes first.
+        """
 
         try:
-            price = float(
-                underlying_price
+            reference_price = float(
+                reference_price
             )
-
-        except (TypeError, ValueError):
+        except (
+            TypeError,
+            ValueError,
+        ):
             return []
 
-        if price <= 0:
+        if reference_price <= 0:
             return []
 
-        options = self.get_options(
-            underlying=underlying,
-            expiry=expiry,
-            option_type="PE",
+        puts = self.get_instruments_for_expiry(
+            underlying,
+            expiry,
+            "PUT",
         )
 
-        otm = [
-            item
-            for item in options
+        otm_puts = [
+            instrument
+            for instrument in puts
             if (
-                item.strike is not None
-                and item.strike < price
+                instrument.strike is not None
+                and instrument.strike < reference_price
             )
         ]
 
-        # Nearest OTM puts are highest strikes below price.
-        otm.sort(
-            key=lambda item: item.strike,
-            reverse=True,
+        otm_puts.sort(
+            key=lambda instrument:
+                reference_price - instrument.strike
+                if instrument.strike is not None
+                else float("inf")
         )
 
-        return otm[:max(0, int(count))]
+        return otm_puts[:count]
 
     # ========================================================
-    # OTM-15 BOTH SIDES
+    # OTM OPTION SUMMARY
     # ========================================================
 
     def get_otm_options(
         self,
         underlying: str,
         expiry: str,
-        underlying_price: float,
+        reference_price: float,
         call_count: int = OTM_CALL_COUNT,
         put_count: int = OTM_PUT_COUNT,
     ) -> dict:
+        """
+        Phase 1 automatic OTM selection:
+
+            5 OTM CALLS
+            5 OTM PUTS
+
+        Counts can be overridden internally,
+        but Phase 1 defaults remain 5 + 5.
+        """
 
         calls = self.get_otm_calls(
             underlying=underlying,
             expiry=expiry,
-            underlying_price=underlying_price,
+            reference_price=reference_price,
             count=call_count,
         )
 
         puts = self.get_otm_puts(
             underlying=underlying,
             expiry=expiry,
-            underlying_price=underlying_price,
+            reference_price=reference_price,
             count=put_count,
         )
 
         return {
+            "underlying": underlying.upper(),
+            "expiry": self._normalize_expiry(
+                expiry
+            ),
+            "reference_price": reference_price,
             "calls": [
-                item.to_dict()
-                for item in calls
+                instrument.to_dict()
+                for instrument in calls
             ],
             "puts": [
-                item.to_dict()
-                for item in puts
+                instrument.to_dict()
+                for instrument in puts
             ],
             "call_count": len(calls),
             "put_count": len(puts),
         }
 
     # ========================================================
-    # XSTREAM SUBSCRIPTION DATA
-    #
-    # Xstream MarketFeedV3 requires:
-    #   Exch
-    #   ExchType
-    #   ScripCode
+    # COMPLETE PHASE 1 CONTRACT SUMMARY
+    # ========================================================
+
+    def get_phase1_contracts(
+        self,
+        underlying: str,
+        expiry: str | None = None,
+        reference_price: float | None = None,
+    ) -> dict:
+        """
+        Phase 1 structure:
+
+            Selected symbol
+                 ↓
+            Selected expiry
+                 ↓
+            Future
+              ↙   ↘
+          5 CALL  5 PUT
+
+        OTM contracts are selected automatically
+        using the future/reference price.
+        """
+
+        underlying = underlying.upper()
+
+        if underlying not in SUPPORTED_UNDERLYINGS:
+            return {
+                "underlying": underlying,
+                "future": None,
+                "expiry": None,
+                "upcoming_expiries": [],
+                "historical_expiries": [],
+                "calls": [],
+                "puts": [],
+            }
+
+        expiry_summary = self.get_expiry_summary(
+            underlying
+        )
+
+        upcoming = expiry_summary[
+            "upcoming"
+        ]
+
+        historical = expiry_summary[
+            "historical"
+        ]
+
+        # Default = nearest upcoming expiry
+        if expiry is None:
+
+            expiry = (
+                upcoming[0]
+                if upcoming
+                else None
+            )
+
+        else:
+
+            expiry = self._normalize_expiry(
+                expiry
+            )
+
+            # Keep explicitly selected historical
+            # expiry if it exists in master.
+            all_expiries = self.get_expiries(
+                underlying
+            )
+
+            if expiry not in all_expiries:
+
+                expiry = (
+                    upcoming[0]
+                    if upcoming
+                    else None
+                )
+
+        future = self.get_nearest_future(
+            underlying,
+            expiry,
+        )
+
+        # Fallback to nearest active future
+        # if selected expiry has no future.
+        if future is None:
+
+            future = self.get_nearest_future(
+                underlying
+            )
+
+        calls: list[Instrument] = []
+        puts: list[Instrument] = []
+
+        if (
+            expiry is not None
+            and reference_price is not None
+        ):
+
+            try:
+                price = float(
+                    reference_price
+                )
+            except (
+                TypeError,
+                ValueError,
+            ):
+                price = 0.0
+
+            if price > 0:
+
+                calls = self.get_otm_calls(
+                    underlying=underlying,
+                    expiry=expiry,
+                    reference_price=price,
+                    count=OTM_CALL_COUNT,
+                )
+
+                puts = self.get_otm_puts(
+                    underlying=underlying,
+                    expiry=expiry,
+                    reference_price=price,
+                    count=OTM_PUT_COUNT,
+                )
+
+        return {
+            "underlying": underlying,
+
+            "future": (
+                future.to_dict()
+                if future is not None
+                else None
+            ),
+
+            "expiry": expiry,
+
+            "upcoming_expiries": upcoming,
+
+            "historical_expiries": historical,
+
+            "calls": [
+                instrument.to_dict()
+                for instrument in calls
+            ],
+
+            "puts": [
+                instrument.to_dict()
+                for instrument in puts
+            ],
+
+            "call_count": len(calls),
+
+            "put_count": len(puts),
+        }
+
+    # ========================================================
+    # VALUE HELPERS
+    # ========================================================
+
+    def _value(
+        self,
+        row: dict,
+        *keys: str,
+    ) -> str:
+
+        for key in keys:
+
+            if (
+                key in row
+                and row[key] is not None
+            ):
+
+                value = str(
+                    row[key]
+                ).strip()
+
+                if value:
+                    return value
+
+        return ""
+
+    # ========================================================
+    # INTEGER HELPER
+    # ========================================================
+
+    def _int_value(
+        self,
+        val: str,
+        default: int | None = None,
+    ) -> int | None:
+
+        try:
+            return int(
+                float(val)
+            )
+
+        except (
+            ValueError,
+            TypeError,
+        ):
+            return default
+
+    # ========================================================
+    # FLOAT HELPER
+    # ========================================================
+
+    def _float_value(
+        self,
+        val: str,
+        default: float | None = None,
+    ) -> float | None:
+
+        try:
+            return float(val)
+
+        except (
+            ValueError,
+            TypeError,
+        ):
+            return default
+
+    # ========================================================
+    # EXPIRY NORMALIZATION
+    # ========================================================
+
+    def _normalize_expiry(
+        self,
+        expiry_str: str,
+    ) -> str | None:
+
+        if not expiry_str:
+            return None
+
+        value = str(
+            expiry_str
+        ).strip()
+
+        if not value:
+            return None
+
+        expiry_date = self._expiry_to_date(
+            value
+        )
+
+        if expiry_date is not None:
+            return expiry_date.strftime(
+                "%Y-%m-%d"
+            )
+
+        return value
+
+    # ========================================================
+    # DETECT UNDERLYING
     # ========================================================
 
     @staticmethod
-    def to_xstream_subscription(
-        instrument: Instrument,
-    ) -> dict:
+    def _detect_underlying(
+        symbol_root: str,
+        symbol: str,
+    ) -> str | None:
 
-        return {
-            "Exch": instrument.exchange,
-            "ExchType": instrument.exchange_type,
-            "ScripCode": instrument.broker_token,
-        }
+        symbol_root = (
+            symbol_root or ""
+        ).upper()
 
-    def build_xstream_subscriptions(
+        symbol = (
+            symbol or ""
+        ).upper()
+
+        if symbol_root in SUPPORTED_UNDERLYINGS:
+            return symbol_root
+
+        for underlying in sorted(
+            SUPPORTED_UNDERLYINGS,
+            key=len,
+            reverse=True,
+        ):
+
+            if underlying in symbol:
+                return underlying
+
+        return None
+
+    # ========================================================
+    # SORT
+    # ========================================================
+
+    def _instrument_sort_key(
         self,
-        instruments: Iterable[Instrument],
-    ) -> list[dict]:
+        inst: Instrument,
+    ):
 
-        subscriptions = []
+        expiry_date = self._expiry_to_date(
+            inst.expiry
+        )
 
-        seen = set()
+        return (
+            inst.underlying,
 
-        for instrument in instruments:
+            expiry_date
+            or date.max,
 
-            token = instrument.broker_token
+            inst.strike
+            if inst.strike is not None
+            else 0.0,
 
-            if token is None:
-                continue
+            inst.instrument_type,
 
-            key = (
-                instrument.exchange,
-                instrument.exchange_type,
-                token,
-            )
-
-            if key in seen:
-                continue
-
-            seen.add(key)
-
-            subscriptions.append(
-                self.to_xstream_subscription(
-                    instrument
-                )
-            )
-
-        return subscriptions
+            inst.broker_token
+            if inst.broker_token is not None
+            else 0,
+        )
 
     # ========================================================
-    # STATUS
+    # BUILD INDEXES
     # ========================================================
 
-    def status(self) -> dict:
+    def _build_indexes(self) -> None:
 
-        counts = {
-            "FUTURE": 0,
-            "CALL": 0,
-            "PUT": 0,
-        }
+        self._token_index.clear()
 
-        underlying_counts = {}
+        self._symbol_index.clear()
 
-        for item in self.instruments:
+        for instrument in self.instruments:
 
-            if item.instrument_type in counts:
-                counts[
-                    item.instrument_type
-                ] += 1
+            if instrument.broker_token is not None:
 
-            underlying_counts.setdefault(
-                item.underlying,
-                0,
-            )
+                self._token_index[
+                    instrument.broker_token
+                ] = instrument
 
-            underlying_counts[
-                item.underlying
-            ] += 1
+            if instrument.symbol:
 
-        return {
-            "loaded": self.loaded,
-            "count": len(self.instruments),
-            "futures": counts["FUTURE"],
-            "calls": counts["CALL"],
-            "puts": counts["PUT"],
-            "underlyings": underlying_counts,
-            "master_file": str(
-                self.master_file
-            ),
-            "last_update": (
-                self.last_update.isoformat()
-                if self.last_update
-                else None
-            ),
-        }
+                self._symbol_index[
+                    instrument.symbol.upper()
+                ] = instrument
 
 
 # ============================================================
-# SINGLE SHARED INSTANCE
+# SHARED INSTRUMENT MANAGER
 # ============================================================
 
 instrument_manager = InstrumentManager()
